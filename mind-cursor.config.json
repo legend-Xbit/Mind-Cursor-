@@ -1,0 +1,32 @@
+{
+  "model": "composer-2.5",
+  "runtime": "local",
+  "local": {
+    "cwd": "."
+  },
+  "cloud": {
+    "autoCreatePR": true,
+    "skipReviewerRequest": true
+  },
+  "enabled": ["notion", "vercel", "github", "slack", "linear", "figma", "treg", "plain"],
+  "includeUnauthenticated": false,
+  "customServers": {},
+  "profiles": {
+    "local-dev": {
+      "runtime": "local"
+    },
+    "ci": {
+      "runtime": "local",
+      "cloud": {
+        "skipReviewerRequest": true
+      }
+    },
+    "cloud-pr": {
+      "runtime": "cloud",
+      "cloud": {
+        "autoCreatePR": true,
+        "skipReviewerRequest": true
+      }
+    }
+  }
+}
