@@ -76,9 +76,19 @@ if (result.status === "error") process.exit(2);
 - `includeUnauthenticated: true` يرفق سيرفرات HTTP بلا توكن (إعادة استخدام OAuth من تطبيق Cursor). مفاتيح حساب الخدمة لا ترث تسجيل دخول المستخدم.
 - السيرفرات المضمّنة في `send` **تستبدل** سيرفرات `create` ولا تُدمج معها.
 
-## تطوير
+## أوامر Slash (اتفاقيات)
+
+الملفات في `commands/` تتبع نفس هيكل [اتفاقيات أوامر Vercel](commands/_conventions.md): Preflight، Plan، Commands، Verification، Summary، Next Steps. الملفات التي تبدأ بـ `_` وثائق وصفية وليست أوامر.
+
+| أمر | وظيفة |
+| --- | --- |
+| `/list` | عرض حالة محولات MCP |
+| `/status` | فحص صحة الطبقة |
+| `/run` | تشغيل وكيل Cursor مع الأدوات الجاهزة |
+| `/serve` | تشغيل سيرفر MCP عبر stdio |
 
 ```bash
+npm run validate:commands
 npm test
 npm run typecheck
 ```

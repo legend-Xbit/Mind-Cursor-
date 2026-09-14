@@ -23,7 +23,8 @@
     "mind": "tsx src/cli.ts",
     "serve": "tsx src/cli.ts serve",
     "test": "tsx --test tests/**/*.test.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "validate:commands": "tsx scripts/validate-commands.ts"
   },
   "dependencies": {
     "@cursor/sdk": "^1.0.0",
