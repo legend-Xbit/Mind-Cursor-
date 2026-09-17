@@ -32,13 +32,14 @@ export GITHUB_TOKEN=...
 
 ```bash
 npx tsx src/cli.ts list
+npx tsx src/cli.ts list --json
 npx tsx src/cli.ts resolve
 npx tsx src/cli.ts run "لخّص هذا المستودع" --runtime local
 npx tsx src/cli.ts resume agent-... "حدّث سجل التغييرات"
 npx tsx src/cli.ts serve
 ```
 
-`serve` يشغّل سيرفر MCP محلي (`mind_list_tools`, `mind_resolve_mcp`, `mind_run_agent`, `mind_resume_agent`). ملف `.cursor/mcp.json` يربطه بهذا المشروع مع Notion وVercel وGitHub وSlack.
+`list --json` and `resolve` print a redacted catalog (`hasHeaders` / `hasAuth`, never `Authorization` or `CLIENT_SECRET` values). `serve` يشغّل سيرفر MCP محلي (`mind_list_tools`, `mind_resolve_mcp`, `mind_run_agent`, `mind_resume_agent`). `mind_list_tools` uses the same redaction. ملف `.cursor/mcp.json` يربطه بهذا المشروع مع Notion وVercel وGitHub وSlack.
 
 ## من الكود
 
@@ -50,7 +51,7 @@ const result = await layer.send("Find the bug in src/auth.ts");
 if (result.status === "error") process.exit(2);
 ```
 
-`Agent.prompt` عبر `layer.prompt()` للطلقة الواحدة. `layer.send()` للبث والمتابعة. السحابة: `{ runtime: "cloud" }` مع `MIND_CURSOR_REPO_URL` أو `cloud.repos` في `mind-cursor.config.json`.
+`Agent.prompt` عبر `layer.prompt()` للطلقة الواحدة. `layer.send()` للبث والمتابعة. Inspect-only helpers (`tools()`, `mcpServers()`, `catalog()`) do not require `CURSOR_API_KEY`. السحابة: `{ runtime: "cloud" }` مع `MIND_CURSOR_REPO_URL` أو `cloud.repos` في `mind-cursor.config.json` — missing both is a startup error. `send()` returns a redacted `tools` catalog (ids/status and non-secret server metadata).
 
 الملف `mind-cursor.config.json` فيه الملفات الشخصية `local-dev` و`ci` و`cloud-pr`.
 
@@ -67,7 +68,7 @@ if (result.status === "error") process.exit(2);
 | `treg` | `TREG_MCP_URL` | needs_config |
 | `plain` | `PLAIN_MCP_URL` | needs_config |
 
-أضف سيرفرات خاصة تحت `customServers` في الإعداد. على السحابة تُحذف `cwd` من إعدادات stdio لأن SDK يرفضها.
+أضف سيرفرات خاصة تحت `customServers` في الإعداد. They attach automatically unless listed in `disabled`. `enabled` filters built-in presets only — you do not need to add a custom id there. على السحابة تُحذف `cwd` من إعدادات stdio لأن SDK يرفضها. Empty URL or stdio command after `${ENV}` expansion is `needs_config`; an empty `Authorization: Bearer …` header is `needs_auth`.
 
 ## ملاحظات SDK
 

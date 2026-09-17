@@ -109,6 +109,19 @@ describe("resolveMcpServers", () => {
       args: ["-y", "@modelcontextprotocol/server-filesystem", "."],
     });
   });
+
+  it("attaches custom servers even when enabled lists only presets", () => {
+    const servers = resolveMcpServers({
+      env: emptyEnv,
+      config: {
+        enabled: ["notion"],
+        customServers: {
+          files: { type: "stdio", command: "npx", args: ["-y", "mcp"] },
+        },
+      },
+    });
+    assert.deepEqual(Object.keys(servers), ["files"]);
+  });
 });
 
 describe("inspectAll + summarize", () => {
@@ -119,5 +132,83 @@ describe("inspectAll + summarize", () => {
     assert.ok(summary.needsConfig.includes("treg"));
     assert.ok(summary.needsConfig.includes("plain"));
     assert.equal(summary.ready.length, 0);
+  });
+});
+
+describe("inspectCustom", () => {
+  it("auto-selects custom servers when enabled lists only presets", () => {
+    const tools = inspectAll({
+      env: emptyEnv,
+      config: {
+        enabled: ["notion"],
+        customServers: {
+          files: { type: "stdio", command: "npx", args: ["-y", "mcp"] },
+        },
+      },
+    });
+    const files = tools.find((tool) => tool.id === "files");
+    assert.equal(files?.status, "ready");
+    assert.equal(tools.find((tool) => tool.id === "vercel")?.status, "disabled");
+  });
+
+  it("still honors disabled for custom servers", () => {
+    const tools = inspectAll({
+      env: emptyEnv,
+      config: {
+        disabled: ["files"],
+        customServers: { files: { type: "stdio", command: "npx" } },
+      },
+    });
+    assert.equal(tools.find((tool) => tool.id === "files")?.status, "disabled");
+  });
+
+  it("marks empty URL after env expand as needs_config", () => {
+    const tools = inspectAll({
+      env: {},
+      config: {
+        customServers: { hook: { type: "http", url: "${HOOK_URL}" } },
+      },
+    });
+    assert.equal(tools.find((tool) => tool.id === "hook")?.status, "needs_config");
+  });
+
+  it("marks stdio without a command as needs_config", () => {
+    const missingCommand = inspectAll({
+      env: {},
+      config: {
+        customServers: { files: { type: "stdio" } as { type: "stdio"; command: string } },
+      },
+    });
+    assert.equal(missingCommand.find((tool) => tool.id === "files")?.status, "needs_config");
+
+    const emptyAfterExpand = inspectAll({
+      env: {},
+      config: {
+        customServers: { files: { type: "stdio", command: "${CUSTOM_CMD}" } },
+      },
+    });
+    assert.equal(emptyAfterExpand.find((tool) => tool.id === "files")?.status, "needs_config");
+  });
+
+  it("marks empty Authorization bearer after env expand as needs_auth", () => {
+    const tools = inspectAll({
+      env: { HOOK_URL: "https://example.test/mcp" },
+      config: {
+        customServers: {
+          hook: {
+            type: "http",
+            url: "${HOOK_URL}",
+            headers: { Authorization: "Bearer ${HOOK_TOKEN}" },
+          },
+        },
+      },
+    });
+    const hook = tools.find((tool) => tool.id === "hook");
+    assert.equal(hook?.status, "needs_auth");
+    assert.ok(hook?.server && "url" in hook.server);
+    if (hook?.server && "url" in hook.server) {
+      assert.equal(hook.server.url, "https://example.test/mcp");
+      assert.equal(hook.server.headers?.Authorization, undefined);
+    }
   });
 });

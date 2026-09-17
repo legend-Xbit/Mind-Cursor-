@@ -2,6 +2,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import { applyProfile, loadConfigFile, resolveModel, resolveRuntime } from "../config.ts";
+import { redactMcpServers, toPublicTools } from "./redact.ts";
 import { inspectAll, resolveMcpServers, summarizeTools } from "./registry.ts";
 import { TOOL_PRESETS } from "./presets.ts";
 import { LAYER_VERSION } from "../version.ts";
@@ -69,7 +70,7 @@ export function createMindCursorMcpServer(): McpServer {
     async ({ profile }) => {
       const layer = loadLayer(profile);
       return {
-        content: [{ type: "text", text: JSON.stringify(layer.tools, null, 2) }],
+        content: [{ type: "text", text: JSON.stringify(toPublicTools(layer.tools), null, 2) }],
       };
     },
   );
@@ -91,36 +92,15 @@ export function createMindCursorMcpServer(): McpServer {
     async ({ profile, includeUnauthenticated }) => {
       const config = applyProfile(loadConfigFile(), profile);
       const runtime = resolveRuntime(config);
-      const servers = resolveMcpServers({
-        config,
-        runtime,
-        includeUnauthenticated,
-      });
-      const redacted = Object.fromEntries(
-        Object.entries(servers).map(([id, server]) => {
-          if ("url" in server) {
-            return [
-              id,
-              {
-                type: server.type ?? "http",
-                url: server.url,
-                hasHeaders: Boolean(server.headers),
-                hasAuth: Boolean(server.auth),
-              },
-            ];
-          }
-          return [
-            id,
-            {
-              type: "stdio",
-              command: server.command,
-              args: server.args,
-            },
-          ];
+      const servers = redactMcpServers(
+        resolveMcpServers({
+          config,
+          runtime,
+          includeUnauthenticated,
         }),
       );
       return {
-        content: [{ type: "text", text: JSON.stringify({ runtime, servers: redacted }, null, 2) }],
+        content: [{ type: "text", text: JSON.stringify({ runtime, servers }, null, 2) }],
       };
     },
   );

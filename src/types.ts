@@ -49,7 +49,10 @@ export type MindCursorConfig = {
     autoCreatePR?: boolean;
     skipReviewerRequest?: boolean;
   };
-  /** Preset ids and custom server names to attach. Empty / omitted = every ready preset + custom server. */
+  /**
+   * Built-in preset ids to attach. Empty / omitted = every preset.
+   * Custom servers under `customServers` are always attached unless listed in `disabled`.
+   */
   enabled?: string[];
   disabled?: string[];
   /** Attach HTTP/SSE servers even when no token is present (OAuth reuse from the Cursor app). */
