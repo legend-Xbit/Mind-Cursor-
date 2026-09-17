@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { applyProfile, loadConfigFile, resolveModel, resolveRuntime } from "./config.ts";
+import { redactMcpServers, toPublicTools } from "./mcp/redact.ts";
 import { inspectAll, resolveMcpServers, summarizeTools } from "./mcp/registry.ts";
 import { EXIT_OK, EXIT_RUN_FAILED, EXIT_STARTUP_FAILED, formatStartupError } from "./sdk/errors.ts";
 import type { RuntimeKind } from "./types.ts";
@@ -96,7 +97,16 @@ async function main(): Promise<number> {
   if (flags.command === "list") {
     const tools = inspectAll({ config: loaded, runtime });
     if (flags.json) {
-      print({ version: LAYER_VERSION, model: resolveModel(loaded), runtime, ...summarizeTools(tools), tools }, true);
+      print(
+        {
+          version: LAYER_VERSION,
+          model: resolveModel(loaded),
+          runtime,
+          ...summarizeTools(tools),
+          tools: toPublicTools(tools),
+        },
+        true,
+      );
     } else {
       for (const tool of tools) {
         const mark =
@@ -119,7 +129,7 @@ async function main(): Promise<number> {
       runtime,
       includeUnauthenticated: flags.includeUnauthenticated,
     });
-    print({ runtime, model: resolveModel(loaded), servers }, true);
+    print({ runtime, model: resolveModel(loaded), servers: redactMcpServers(servers) }, true);
     return EXIT_OK;
   }
 
