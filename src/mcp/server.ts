@@ -136,6 +136,7 @@ export function createMindCursorMcpServer(): McpServer {
                 runId: result.runId,
                 status: result.status,
                 result: result.result,
+                error: result.error,
                 attached: Object.keys(layer.mcpServers()),
               },
               null,
@@ -143,7 +144,7 @@ export function createMindCursorMcpServer(): McpServer {
             ),
           },
         ],
-        isError: result.status === "error",
+        isError: result.status !== "finished",
       };
     },
   );
@@ -175,13 +176,14 @@ export function createMindCursorMcpServer(): McpServer {
                 runId: result.runId,
                 status: result.status,
                 result: result.result,
+                error: result.error,
               },
               null,
               2,
             ),
           },
         ],
-        isError: result.status === "error",
+        isError: result.status !== "finished",
       };
     },
   );

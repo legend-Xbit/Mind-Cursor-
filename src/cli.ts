@@ -2,7 +2,7 @@
 import { applyProfile, loadConfigFile, resolveModel, resolveRuntime } from "./config.ts";
 import { redactMcpServers, toPublicTools } from "./mcp/redact.ts";
 import { inspectAll, resolveMcpServers, summarizeTools } from "./mcp/registry.ts";
-import { EXIT_OK, EXIT_RUN_FAILED, EXIT_STARTUP_FAILED, formatStartupError } from "./sdk/errors.ts";
+import { EXIT_OK, EXIT_STARTUP_FAILED, exitCodeForRunStatus, formatStartupError } from "./sdk/errors.ts";
 import type { RuntimeKind } from "./types.ts";
 import { LAYER_VERSION } from "./version.ts";
 
@@ -167,7 +167,11 @@ async function main(): Promise<number> {
       process.stdout.write("\n");
     }
     process.stderr.write(`status=${result.status} agent=${result.agentId} run=${result.runId ?? ""}\n`);
-    return result.status === "error" ? EXIT_RUN_FAILED : EXIT_OK;
+    if (result.error?.message) {
+      const code = result.error.code ? ` code=${result.error.code}` : "";
+      process.stderr.write(`error=${result.error.message}${code}\n`);
+    }
+    return exitCodeForRunStatus(result.status);
   }
 
   process.stderr.write(usage());

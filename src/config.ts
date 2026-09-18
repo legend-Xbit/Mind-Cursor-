@@ -37,22 +37,34 @@ export function parseConfig(raw: unknown): MindCursorConfig {
 }
 
 export function loadConfigFile(
-  path = process.env.MIND_CURSOR_CONFIG ?? "mind-cursor.config.json",
+  path?: string,
   env: NodeJS.ProcessEnv = process.env,
 ): MindCursorConfig {
-  const absolute = resolve(path);
+  const configured = path ?? env.MIND_CURSOR_CONFIG;
+  const absolute = resolve(configured ?? "mind-cursor.config.json");
   let text: string;
   try {
     text = readFileSync(absolute, "utf8");
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code;
     if (code === "ENOENT") {
+      // Default path is optional. An explicit path (argument or MIND_CURSOR_CONFIG)
+      // must exist — otherwise a typo silently ran with empty config.
+      if (configured) {
+        throw new Error(`mind-cursor config not found: ${absolute}`);
+      }
       return {};
     }
     throw error;
   }
-  const parsed = parseConfig(JSON.parse(text));
-  return interpolateUnknown(parsed, env) as MindCursorConfig;
+  try {
+    return interpolateUnknown(parseConfig(JSON.parse(text)), env) as MindCursorConfig;
+  } catch (error) {
+    if (error instanceof SyntaxError) {
+      throw new Error(`Invalid JSON in mind-cursor config ${absolute}: ${error.message}`);
+    }
+    throw error;
+  }
 }
 
 export function mergeConfig(
@@ -85,8 +97,13 @@ export function applyProfile(config: MindCursorConfig, profile?: string): MindCu
   return mergeConfig(withoutProfiles, overlay);
 }
 
+function nonempty(value: string | undefined): string | undefined {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : undefined;
+}
+
 export function resolveModel(config: MindCursorConfig, env: NodeJS.ProcessEnv = process.env): string {
-  return config.model ?? env.MIND_CURSOR_MODEL ?? "composer-2.5";
+  return nonempty(config.model) ?? nonempty(env.MIND_CURSOR_MODEL) ?? "composer-2.5";
 }
 
 export function resolveRuntime(

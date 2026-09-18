@@ -19,11 +19,20 @@ export type MindCursorOptions = {
   stream?: boolean;
 };
 
+export type MindRunError = {
+  message: string;
+  code?: string;
+};
+
+export type MindRunStatus = "finished" | "error" | "cancelled";
+
 export type MindRunResult = {
   agentId: string;
   runId?: string;
-  status: string;
+  status: MindRunStatus;
   result?: unknown;
+  /** Terminal failure details from `run.wait()` when the SDK provides them. */
+  error?: MindRunError;
   /** Catalog snapshot with secrets stripped from server configs. */
   tools: PublicResolvedTool[];
 };
@@ -50,7 +59,7 @@ export class MindCursor {
     const loaded = options.config ?? loadConfigFile(options.configPath, this.env);
     this.config = applyProfile(loaded, options.profile);
     this.runtime = resolveRuntime(this.config, options.runtime, this.env);
-    this.model = options.model ?? resolveModel(this.config, this.env);
+    this.model = options.model?.trim() || resolveModel(this.config, this.env);
     this.apiKey = readApiKey(options, this.env);
     this.cwd = options.cwd ?? this.config.local?.cwd ?? process.cwd();
     this.includeUnauthenticated =
@@ -79,9 +88,11 @@ export class MindCursor {
     return [];
   }
 
-  private assertReadyToRun(): string {
+  private assertReadyToRun(kind: "create" | "resume" = "create"): string {
     const apiKey = this.requireApiKey();
-    if (this.runtime === "cloud" && this.cloudRepos().length === 0) {
+    // Resume reattaches to an existing agent (runtime is inferred from the id).
+    // Requiring repos here blocked `resume bc-…` when only the agent id is known.
+    if (kind === "create" && this.runtime === "cloud" && this.cloudRepos().length === 0) {
       throw new Error(CLOUD_REPO_REQUIRED);
     }
     return apiKey;
@@ -136,18 +147,13 @@ export class MindCursor {
   }
 
   async send(message: string, options: { stream?: boolean; agentId?: string } = {}): Promise<MindRunResult> {
-    const apiKey = this.assertReadyToRun();
+    const apiKey = this.assertReadyToRun(options.agentId ? "resume" : "create");
     const mcpServers = this.mcpServers();
     const agentOptions = this.agentOptions(mcpServers, apiKey);
 
     try {
       const agent = options.agentId
-        ? await Agent.resume(options.agentId, {
-            apiKey,
-            model: { id: this.model },
-            mcpServers,
-            ...(this.runtime === "local" ? { local: { cwd: this.cwd } } : {}),
-          })
+        ? await Agent.resume(options.agentId, agentOptions)
         : await Agent.create(agentOptions);
 
       try {
@@ -164,6 +170,7 @@ export class MindCursor {
           runId: run.id,
           status: result.status,
           result: result.result,
+          error: result.error,
           tools: toPublicTools(this.tools()),
         };
       } finally {
