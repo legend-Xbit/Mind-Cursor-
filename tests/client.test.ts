@@ -2,17 +2,18 @@ import assert from "node:assert/strict";
 import { afterEach, beforeEach, describe, it, mock } from "node:test";
 import { Agent, type AgentOptions } from "@cursor/sdk";
 import { createMindCursor } from "../src/sdk/client.ts";
+import { EXIT_OK, EXIT_RUN_FAILED, exitCodeForRunStatus } from "../src/sdk/errors.ts";
 
 const FIXTURE_NOTION_TOKEN = "ntn_fixture_send_token_ffff";
 const FIXTURE_FIGMA_SECRET = "fig_fixture_send_secret_gggg";
 
-function fakeAgent(agentId: string) {
+function fakeAgent(agentId: string, waitResult: { status: string; result?: unknown; error?: { message: string; code?: string } } = { status: "finished", result: "ok" }) {
   return {
     agentId,
     send: async () => ({
       id: "run-test",
       async *stream() {},
-      wait: async () => ({ status: "finished", result: "ok" }),
+      wait: async () => waitResult,
     }),
     async [Symbol.asyncDispose]() {},
   };
@@ -82,6 +83,49 @@ describe("MindCursor.send contracts", () => {
     assert.ok(lastResume?.options?.mcpServers);
     assert.ok(lastResume.options.mcpServers.notion);
     assertNoLeakedSecrets(JSON.stringify(result));
+  });
+
+  it("passes mcpServers and cloud options to Agent.resume without requiring repos", async () => {
+    const cloud = createMindCursor({
+      apiKey: "cursor_test_key",
+      runtime: "cloud",
+      config: {},
+      env: { CURSOR_API_KEY: "cursor_test_key" },
+    });
+    const result = await cloud.send("follow up", { agentId: "bc-99", stream: false });
+    assert.equal(resumeMock.mock.callCount(), 1);
+    assert.equal(createMock.mock.callCount(), 0);
+    assert.equal(lastResume?.agentId, "bc-99");
+    assert.ok(lastResume?.options?.mcpServers);
+    assert.ok(lastResume?.options?.cloud);
+    assert.equal(result.status, "finished");
+  });
+
+  it("forwards wait() error details and cancelled status", async () => {
+    createMock.mock.restore();
+    createMock = mock.method(Agent, "create", async (options: AgentOptions) => {
+      lastCreate = options;
+      return fakeAgent("agent-created", {
+        status: "error",
+        error: { message: "model overloaded", code: "unavailable" },
+      });
+    });
+    const result = await layer().send("hello", { stream: false });
+    assert.equal(result.status, "error");
+    assert.deepEqual(result.error, { message: "model overloaded", code: "unavailable" });
+    assert.equal(exitCodeForRunStatus(result.status), EXIT_RUN_FAILED);
+  });
+
+  it("treats cancelled runs as failures", async () => {
+    createMock.mock.restore();
+    createMock = mock.method(Agent, "create", async (options: AgentOptions) => {
+      lastCreate = options;
+      return fakeAgent("agent-created", { status: "cancelled" });
+    });
+    const result = await layer().send("hello", { stream: false });
+    assert.equal(result.status, "cancelled");
+    assert.equal(exitCodeForRunStatus(result.status), EXIT_RUN_FAILED);
+    assert.equal(exitCodeForRunStatus("finished"), EXIT_OK);
   });
 
   it("fails startup when cloud runtime has no repos", async () => {

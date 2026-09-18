@@ -1,9 +1,13 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { mkdtemp, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   applyProfile,
   interpolateEnv,
   interpolateUnknown,
+  loadConfigFile,
   mergeConfig,
   resolveModel,
   resolveRuntime,
@@ -65,6 +69,8 @@ describe("resolve defaults", () => {
     assert.equal(resolveModel({ model: "auto" }, { MIND_CURSOR_MODEL: "other" }), "auto");
     assert.equal(resolveModel({}, { MIND_CURSOR_MODEL: "auto" }), "auto");
     assert.equal(resolveModel({}, {}), "composer-2.5");
+    assert.equal(resolveModel({ model: "  " }, { MIND_CURSOR_MODEL: "auto" }), "auto");
+    assert.equal(resolveModel({ model: "" }, {}), "composer-2.5");
   });
 
   it("merges nested local/cloud/customServers", () => {
@@ -75,5 +81,51 @@ describe("resolve defaults", () => {
     assert.equal(merged.local?.cwd, "/b");
     assert.equal(merged.customServers?.a?.url, "https://a");
     assert.equal(merged.customServers?.b?.url, "https://b");
+  });
+});
+
+describe("loadConfigFile", () => {
+  it("returns empty config when the default file is missing", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "mind-cursor-noconfig-"));
+    const previous = process.cwd();
+    process.chdir(dir);
+    try {
+      assert.deepEqual(loadConfigFile(undefined, {}), {});
+    } finally {
+      process.chdir(previous);
+    }
+  });
+
+  it("throws when an explicit path does not exist", () => {
+    assert.throws(
+      () => loadConfigFile(join(tmpdir(), "mind-cursor-missing-config.json")),
+      /mind-cursor config not found/,
+    );
+  });
+
+  it("throws when MIND_CURSOR_CONFIG points at a missing file", () => {
+    assert.throws(
+      () =>
+        loadConfigFile(undefined, {
+          MIND_CURSOR_CONFIG: join(tmpdir(), "mind-cursor-env-missing.json"),
+        }),
+      /mind-cursor config not found/,
+    );
+  });
+
+  it("throws a path-qualified error for invalid JSON", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "mind-cursor-config-"));
+    const path = join(dir, "mind-cursor.config.json");
+    await writeFile(path, "{ not json", "utf8");
+    assert.throws(() => loadConfigFile(path), /Invalid JSON in mind-cursor config/);
+  });
+
+  it("loads and interpolates an explicit config file", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "mind-cursor-config-"));
+    const path = join(dir, "mind-cursor.config.json");
+    await writeFile(path, JSON.stringify({ model: "${MODEL_ID}", runtime: "local" }), "utf8");
+    const loaded = loadConfigFile(path, { MODEL_ID: "composer-2.5" });
+    assert.equal(loaded.model, "composer-2.5");
+    assert.equal(loaded.runtime, "local");
   });
 });

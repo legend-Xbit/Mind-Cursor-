@@ -1,7 +1,7 @@
 export { applyProfile, interpolateEnv, loadConfigFile, mergeConfig } from "./config.ts";
 export { createMindCursor, MindCursor } from "./sdk/client.ts";
-export type { MindCursorOptions, MindRunResult } from "./sdk/client.ts";
-export { EXIT_OK, EXIT_RUN_FAILED, EXIT_STARTUP_FAILED, formatStartupError } from "./sdk/errors.ts";
+export type { MindCursorOptions, MindRunError, MindRunResult, MindRunStatus } from "./sdk/client.ts";
+export { EXIT_OK, EXIT_RUN_FAILED, EXIT_STARTUP_FAILED, exitCodeForRunStatus, formatStartupError } from "./sdk/errors.ts";
 export { createMindCursorMcpServer, serveMindCursorMcp } from "./mcp/server.ts";
 export { redactMcpServer, redactMcpServers, toPublicTool, toPublicTools } from "./mcp/redact.ts";
 export type { PublicResolvedTool, RedactedMcpServer } from "./mcp/redact.ts";

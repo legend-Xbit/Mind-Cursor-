@@ -2,6 +2,11 @@ export const EXIT_STARTUP_FAILED = 1;
 export const EXIT_RUN_FAILED = 2;
 export const EXIT_OK = 0;
 
+/** Finished runs succeed; error and cancelled both mean the run did not complete. */
+export function exitCodeForRunStatus(status: string): number {
+  return status === "finished" ? EXIT_OK : EXIT_RUN_FAILED;
+}
+
 export function isCursorAgentError(error: unknown): error is {
   message: string;
   isRetryable?: boolean;
