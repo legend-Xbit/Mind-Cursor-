@@ -62,7 +62,6 @@ export function loadConfigFile(options: LoadConfigOptions = {}): LoadedConfig {
   const source: ConfigSource = explicit ? "explicit" : "discovered";
   const absolute = resolve(explicit ?? "mind-cursor.config.json");
   const dir = dirname(absolute);
-
   let text: string;
   try {
     text = readFileSync(absolute, "utf8");
@@ -119,8 +118,13 @@ export function applyProfile(config: MindCursorConfig, profile?: string): MindCu
   return mergeConfig(withoutProfiles, overlay);
 }
 
+function nonempty(value: string | undefined): string | undefined {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : undefined;
+}
+
 export function resolveModel(config: MindCursorConfig, env: NodeJS.ProcessEnv = process.env): string {
-  return config.model ?? env.MIND_CURSOR_MODEL ?? "composer-2.5";
+  return nonempty(config.model) ?? nonempty(env.MIND_CURSOR_MODEL) ?? "composer-2.5";
 }
 
 export function resolveRuntime(

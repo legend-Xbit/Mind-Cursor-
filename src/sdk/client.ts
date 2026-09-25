@@ -1,9 +1,10 @@
 import { resolve } from "node:path";
 import { Agent, CursorAgentError, type AgentOptions } from "@cursor/sdk";
 import { applyProfile, loadConfigFile, resolveModel, resolveRuntime } from "../config.ts";
-import { inspectAll, resolveMcpServers, summarizeTools } from "../mcp/registry.ts";
+import { toPublicTools, type PublicResolvedTool } from "../mcp/redact.ts";
 import { getPreset } from "../mcp/presets.ts";
-import type { McpServerConfig, MindCursorConfig, ResolvedTool, RuntimeKind } from "../types.ts";
+import { inspectAll, resolveMcpServers, summarizeTools } from "../mcp/registry.ts";
+import type { CloudRepoConfig, McpServerConfig, MindCursorConfig, ResolvedTool, RuntimeKind } from "../types.ts";
 import { formatStartupError } from "./errors.ts";
 import { writeAssistantStream } from "./run.ts";
 
@@ -35,20 +36,30 @@ export type MindCursorOptions = {
   trustConfig?: boolean;
 };
 
+export type MindRunError = {
+  message: string;
+  code?: string;
+};
+
+export type MindRunStatus = "finished" | "error" | "cancelled";
+
 export type MindRunResult = {
   agentId: string;
   runId?: string;
-  status: string;
+  status: MindRunStatus;
   result?: unknown;
-  tools: ResolvedTool[];
+  /** Terminal failure details from `run.wait()` when the SDK provides them. */
+  error?: MindRunError;
+  /** Catalog snapshot with secrets stripped from server configs. */
+  tools: PublicResolvedTool[];
 };
 
-function requireApiKey(options: MindCursorOptions, env: NodeJS.ProcessEnv): string {
+const CLOUD_REPO_REQUIRED =
+  "Cloud runtime requires at least one repo. Set cloud.repos in mind-cursor.config.json or MIND_CURSOR_REPO_URL.";
+
+function readApiKey(options: MindCursorOptions, env: NodeJS.ProcessEnv): string | undefined {
   const key = (options.apiKey ?? env.CURSOR_API_KEY)?.trim();
-  if (!key) {
-    throw new Error("CURSOR_API_KEY is required. Pass apiKey or set the environment variable.");
-  }
-  return key;
+  return key || undefined;
 }
 
 export class MindCursor {
@@ -57,7 +68,7 @@ export class MindCursor {
   readonly trustCustomServers: boolean;
   readonly runtime: RuntimeKind;
   readonly model: string;
-  readonly apiKey: string;
+  readonly apiKey: string | undefined;
   readonly cwd: string;
   readonly env: NodeJS.ProcessEnv;
   readonly includeUnauthenticated: boolean;
@@ -83,8 +94,8 @@ export class MindCursor {
     this.trustCustomServers =
       trustedBySource || options.trustConfig === true || this.env.MIND_CURSOR_TRUST_CONFIG === "1";
     this.runtime = resolveRuntime(this.config, options.runtime, this.env);
-    this.model = options.model ?? resolveModel(this.config, this.env);
-    this.apiKey = requireApiKey(options, this.env);
+    this.model = options.model?.trim() || resolveModel(this.config, this.env);
+    this.apiKey = readApiKey(options, this.env);
     this.cwd = resolve(configDir ?? process.cwd(), options.cwd ?? this.config.local?.cwd ?? ".");
     this.includeUnauthenticated =
       options.includeUnauthenticated ?? this.config.includeUnauthenticated ?? false;
@@ -103,6 +114,36 @@ export class MindCursor {
       return [];
     }
     return Object.keys(this.config.customServers ?? {}).filter((id) => !getPreset(id));
+  }
+
+  private requireApiKey(): string {
+    if (!this.apiKey) {
+      throw new Error("CURSOR_API_KEY is required. Pass apiKey or set the environment variable.");
+    }
+    return this.apiKey;
+  }
+
+  private cloudRepos(): CloudRepoConfig[] {
+    if (this.config.cloud?.repos && this.config.cloud.repos.length > 0) {
+      return this.config.cloud.repos;
+    }
+    if (this.env.MIND_CURSOR_REPO_URL?.trim()) {
+      return [
+        {
+          url: this.env.MIND_CURSOR_REPO_URL,
+          startingRef: this.env.MIND_CURSOR_STARTING_REF ?? "main",
+        },
+      ];
+    }
+    return [];
+  }
+
+  private assertReadyToRun(kind: "create" | "resume" = "create"): string {
+    const apiKey = this.requireApiKey();
+    if (kind === "create" && this.runtime === "cloud" && this.cloudRepos().length === 0) {
+      throw new Error(CLOUD_REPO_REQUIRED);
+    }
+    return apiKey;
   }
 
   tools(): ResolvedTool[] {
@@ -131,26 +172,18 @@ export class MindCursor {
     return summarizeTools(this.tools());
   }
 
-  private agentOptions(mcpServers: Record<string, McpServerConfig>): AgentOptions {
-    const cloudRepos =
-      this.config.cloud?.repos ??
-      (this.env.MIND_CURSOR_REPO_URL
-        ? [
-            {
-              url: this.env.MIND_CURSOR_REPO_URL,
-              startingRef: this.env.MIND_CURSOR_STARTING_REF ?? "main",
-            },
-          ]
-        : []);
-
+  private agentOptions(
+    mcpServers: Record<string, McpServerConfig>,
+    apiKey: string,
+  ): AgentOptions {
     return {
-      apiKey: this.apiKey,
+      apiKey,
       model: { id: this.model },
       mcpServers,
       ...(this.runtime === "cloud"
         ? {
             cloud: {
-              repos: cloudRepos,
+              repos: this.cloudRepos(),
               autoCreatePR: this.config.cloud?.autoCreatePR ?? false,
               skipReviewerRequest: this.config.cloud?.skipReviewerRequest ?? true,
             },
@@ -166,17 +199,13 @@ export class MindCursor {
   }
 
   async send(message: string, options: { stream?: boolean; agentId?: string } = {}): Promise<MindRunResult> {
+    const apiKey = this.assertReadyToRun(options.agentId ? "resume" : "create");
     const mcpServers = this.mcpServers();
-    const agentOptions = this.agentOptions(mcpServers);
+    const agentOptions = this.agentOptions(mcpServers, apiKey);
 
     try {
       const agent = options.agentId
-        ? await Agent.resume(options.agentId, {
-            apiKey: this.apiKey,
-            model: { id: this.model },
-            mcpServers,
-            ...(this.runtime === "local" ? { local: { cwd: this.cwd } } : {}),
-          })
+        ? await Agent.resume(options.agentId, agentOptions)
         : await Agent.create(agentOptions);
 
       try {
@@ -193,7 +222,8 @@ export class MindCursor {
           runId: run.id,
           status: result.status,
           result: result.result,
-          tools: this.tools(),
+          error: result.error,
+          tools: toPublicTools(this.tools()),
         };
       } finally {
         await agent[Symbol.asyncDispose]();

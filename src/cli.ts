@@ -33,14 +33,14 @@ Usage:
 
 Flags:
   --config path              explicit mind-cursor.config.json path (also trusts its customServers)
-  --trust-config              trust customServers from a config file discovered in cwd
-  --reveal-secrets            print raw tokens/headers instead of redacted key names (list/resolve only)
-  --include-unauthenticated   attach HTTP/SSE servers that have a URL but no token
+  --trust-config             trust customServers from a config file discovered in cwd
+  --reveal-secrets           print raw tokens/headers instead of redacted key names (list/resolve only)
+  --include-unauthenticated  attach HTTP/SSE servers that have a URL but no token
 
 Environment:
-  CURSOR_API_KEY          required for run / resume
-  MIND_CURSOR_CONFIG      path to mind-cursor.config.json (same as --config)
-  MIND_CURSOR_TRUST_CONFIG=1  same as --trust-config
+  CURSOR_API_KEY             required for run / resume
+  MIND_CURSOR_CONFIG         path to mind-cursor.config.json (same as --config)
+  MIND_CURSOR_TRUST_CONFIG=1 same as --trust-config
 
 Exit codes (run / resume): 0 finished, 1 startup failed, 2 run failed, 3 run cancelled.
 `;
@@ -192,6 +192,10 @@ async function main(): Promise<number> {
       process.stdout.write("\n");
     }
     process.stderr.write(`status=${result.status} agent=${result.agentId} run=${result.runId ?? ""}\n`);
+    if (result.error?.message) {
+      const code = result.error.code ? ` code=${result.error.code}` : "";
+      process.stderr.write(`error=${result.error.message}${code}\n`);
+    }
     return exitCodeForStatus(result.status);
   }
 

@@ -1,4 +1,4 @@
-import { getPreset, TOOL_PRESETS } from "./presets.ts";
+import { interpolateUnknown } from "../config.ts";
 import type {
   HttpMcpServerConfig,
   McpServerConfig,
@@ -10,6 +10,7 @@ import type {
   ToolPreset,
   ToolStatus,
 } from "../types.ts";
+import { getPreset, TOOL_PRESETS } from "./presets.ts";
 
 function firstEnv(env: NodeJS.ProcessEnv, keys: string[] | undefined): string | undefined {
   if (!keys) {
@@ -29,15 +30,41 @@ function presetUrl(preset: ToolPreset, env: NodeJS.ProcessEnv): string | undefin
   return fromEnv || preset.defaultUrl;
 }
 
-function isSelected(id: string, config: MindCursorConfig): boolean {
+function isSelected(
+  id: string,
+  config: MindCursorConfig,
+  kind: "preset" | "custom" = "preset",
+): boolean {
   if (config.disabled?.includes(id)) {
     return false;
+  }
+  if (kind === "custom") {
+    return true;
   }
   if (config.enabled && config.enabled.length > 0) {
     return config.enabled.includes(id);
   }
   return true;
 }
+
+function isEmptyBearer(value: string): boolean {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return true;
+  }
+  return /^Bearer\s*$/i.test(trimmed);
+}
+
+type InspectedCustomServer = {
+  type?: string;
+  url?: string;
+  command?: string;
+  args?: string[];
+  headers?: Record<string, string>;
+  auth?: HttpMcpServerConfig["auth"];
+  env?: Record<string, string>;
+  cwd?: string;
+};
 
 function buildHttpServer(preset: ToolPreset, env: NodeJS.ProcessEnv): {
   server?: HttpMcpServerConfig;
@@ -61,7 +88,7 @@ function buildHttpServer(preset: ToolPreset, env: NodeJS.ProcessEnv): {
   const server: HttpMcpServerConfig = { type: "http", url };
 
   if (token) {
-    server.headers = { Authorization: `Bearer ${token}` };
+    server.headers = { Authorization: "Bearer " + token };
   }
   if (clientId) {
     server.auth = {
@@ -106,34 +133,104 @@ export function inspectCustom(
   server: McpServerConfig,
   selected: boolean,
   trust: CustomServerTrust = { trusted: false },
+  env: NodeJS.ProcessEnv = process.env,
 ): ResolvedTool {
+  const base = {
+    id,
+    title: id,
+    description: "Custom MCP server from mind-cursor.config.json",
+    category: "custom" as const,
+  };
+
   if (!selected) {
     return {
-      id,
-      title: id,
-      description: "Custom MCP server from mind-cursor.config.json",
-      category: "custom",
+      ...base,
       status: "disabled",
-      reason: "Not in enabled list, or listed in disabled.",
+      reason: "Listed in disabled.",
     };
   }
+
   if (!trust.trusted) {
     return {
-      id,
-      title: id,
-      description: "Custom MCP server from mind-cursor.config.json",
-      category: "custom",
+      ...base,
       status: "needs_config",
       reason: `untrusted customServers entry from ${trust.configPath ?? "the discovered config file"} — pass --trust-config or MIND_CURSOR_TRUST_CONFIG=1`,
     };
   }
+
+  const interpolated = interpolateUnknown(server, env) as InspectedCustomServer;
+  const looksHttp =
+    interpolated.type === "http" || interpolated.type === "sse" || interpolated.url !== undefined;
+  const looksStdio = interpolated.type === "stdio" || interpolated.command !== undefined;
+
+  if (looksHttp) {
+    const url = interpolated.url?.trim() ?? "";
+    if (!url) {
+      return {
+        ...base,
+        status: "needs_config",
+        reason: `Set a URL for custom server "${id}" (empty after env expansion).`,
+      };
+    }
+
+    const headers = interpolated.headers ? { ...interpolated.headers } : undefined;
+    const authorization = headers?.Authorization;
+    if (headers && authorization !== undefined && isEmptyBearer(authorization)) {
+      delete headers.Authorization;
+      const cleaned: HttpMcpServerConfig = {
+        type: interpolated.type === "sse" ? "sse" : "http",
+        url,
+        headers: Object.keys(headers).length > 0 ? headers : undefined,
+        ...(interpolated.auth ? { auth: interpolated.auth } : {}),
+      };
+      return {
+        ...base,
+        status: "needs_auth",
+        reason: `Authorization bearer for "${id}" is empty after env expansion.`,
+        server: cleaned,
+      };
+    }
+
+    const readyHttp: HttpMcpServerConfig = {
+      type: interpolated.type === "sse" ? "sse" : "http",
+      url,
+      ...(headers ? { headers } : {}),
+      ...(interpolated.auth ? { auth: interpolated.auth } : {}),
+    };
+    return {
+      ...base,
+      status: "ready",
+      server: readyHttp,
+    };
+  }
+
+  if (looksStdio) {
+    const command = interpolated.command?.trim() ?? "";
+    if (!command) {
+      return {
+        ...base,
+        status: "needs_config",
+        reason: `Set a command for custom stdio server "${id}" (empty after env expansion).`,
+      };
+    }
+    const readyStdio: StdioMcpServerConfig = {
+      type: "stdio",
+      command,
+      ...(interpolated.args ? { args: interpolated.args } : {}),
+      ...(interpolated.env ? { env: interpolated.env } : {}),
+      ...(interpolated.cwd ? { cwd: interpolated.cwd } : {}),
+    };
+    return {
+      ...base,
+      status: "ready",
+      server: readyStdio,
+    };
+  }
+
   return {
-    id,
-    title: id,
-    description: "Custom MCP server from mind-cursor.config.json",
-    category: "custom",
-    status: "ready",
-    server,
+    ...base,
+    status: "needs_config",
+    reason: `Custom server "${id}" needs an HTTP url or a stdio command.`,
   };
 }
 
@@ -169,7 +266,7 @@ export function inspectAll(options: ResolveOptions = {}): ResolvedTool[] {
     if (getPreset(id)) {
       continue;
     }
-    tools.push(inspectCustom(id, server, isSelected(id, config), trust));
+    tools.push(inspectCustom(id, server, isSelected(id, config, "custom"), trust, env));
   }
 
   return tools;
@@ -200,12 +297,7 @@ export function resolveMcpServers(options: ResolveOptions = {}): Record<string, 
   return servers;
 }
 
-export function summarizeTools(tools: ResolvedTool[]): {
-  ready: string[];
-  needsAuth: string[];
-  needsConfig: string[];
-  disabled: string[];
-} {
+export function summarizeTools(tools: ResolvedTool[]) {
   return {
     ready: tools.filter((tool) => tool.status === "ready").map((tool) => tool.id),
     needsAuth: tools.filter((tool) => tool.status === "needs_auth").map((tool) => tool.id),

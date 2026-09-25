@@ -11,7 +11,7 @@ Cursor يحمّل سيرفرات MCP من مصادر متعددة، والأول
 1. تسجّل الأدوات الجاهزة فقط (token أو OAuth موجود).
 2. تبني `mcpServers` بنفس شكل SDK (`http` / `sse` / `stdio`).
 3. تعيد تمريرها في كل `create` و`resume`.
-4. تفرّق بين فشل الإقلاع (`CursorAgentError` → خروج 1) وفشل التشغيل (`status === "error"` → خروج 2).
+4. تفرّق بين فشل الإقلاع (`CursorAgentError` → خروج 1) وفشل التشغيل (`status === "error"` → خروج 2، `status === "cancelled"` → خروج 3).
 
 ## تثبيت
 
@@ -32,6 +32,7 @@ export GITHUB_TOKEN=...
 
 ```bash
 npx tsx src/cli.ts list
+npx tsx src/cli.ts list --json
 npx tsx src/cli.ts resolve
 npx tsx src/cli.ts run "لخّص هذا المستودع" --runtime local
 npx tsx src/cli.ts resume agent-... "حدّث سجل التغييرات"
@@ -55,10 +56,11 @@ import { createMindCursor } from "mind-cursor";
 
 const layer = createMindCursor({ runtime: "local" });
 const result = await layer.send("Find the bug in src/auth.ts");
-if (result.status === "error") process.exit(2);
+if (result.status === "cancelled") process.exit(3);
+if (result.status !== "finished") process.exit(2);
 ```
 
-`Agent.prompt` عبر `layer.prompt()` للطلقة الواحدة. `layer.send()` للبث والمتابعة. السحابة: `{ runtime: "cloud" }` مع `MIND_CURSOR_REPO_URL` أو `cloud.repos` في `mind-cursor.config.json`.
+`Agent.prompt` عبر `layer.prompt()` للطلقة الواحدة. `layer.send()` للبث والمتابعة. Inspect-only helpers (`tools()`, `mcpServers()`, `catalog()`) do not require `CURSOR_API_KEY`. السحابة: `{ runtime: "cloud" }` مع `MIND_CURSOR_REPO_URL` أو `cloud.repos` في `mind-cursor.config.json` — missing both is a startup error on **create**. `resume` of an existing `bc-*` agent does not require repos. `send()` returns a redacted `tools` catalog (ids/status and non-secret server metadata) and forwards `error` from `run.wait()` when the run fails. An explicit `MIND_CURSOR_CONFIG` / `configPath` that does not exist is a startup error (the default `mind-cursor.config.json` may be omitted).
 
 الملف `mind-cursor.config.json` فيه الملفات الشخصية `local-dev` و`ci` و`cloud-pr`.
 
@@ -75,7 +77,7 @@ if (result.status === "error") process.exit(2);
 | `treg` | `TREG_MCP_URL` | needs_config |
 | `plain` | `PLAIN_MCP_URL` | needs_config |
 
-أضف سيرفرات خاصة تحت `customServers` في الإعداد (راجع "مصدر الإعداد والثقة" أعلاه لشرط التوثيق). على السحابة تُحذف `cwd` من إعدادات stdio لأن SDK يرفضها. `local.cwd` (عند تحديده) يُحسَب نسبةً لمجلد ملف الإعداد، لا مجلد العمل الحالي.
+أضف سيرفرات خاصة تحت `customServers` في الإعداد (راجع "مصدر الإعداد والثقة" أعلاه لشرط التوثيق). They attach automatically unless listed in `disabled`; `enabled` filters built-in presets only, so you do not need to add a custom id there. على السحابة تُحذف `cwd` من إعدادات stdio لأن SDK يرفضها. `local.cwd` (عند تحديده) يُحسَب نسبةً لمجلد ملف الإعداد، لا مجلد العمل الحالي. Empty URL or stdio command after `${ENV}` expansion is `needs_config`; an empty `Authorization: ****** after expansion is `needs_auth`.
 
 ## ملاحظات SDK
 

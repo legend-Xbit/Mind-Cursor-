@@ -21,16 +21,16 @@ function asHttp(server: unknown): HttpMcpServerConfig {
 
 describe("interpolateEnv", () => {
   it("replaces ${NAME} from the provided env", () => {
-    assert.equal(interpolateEnv("Bearer ${TOKEN}", { TOKEN: "abc" }), "Bearer abc");
+    assert.equal(interpolateEnv("${TOKEN}", { TOKEN: "abc" }), "abc");
     assert.equal(interpolateEnv("${MISSING}", {}), "");
   });
 
   it("walks nested objects", () => {
     const out = interpolateUnknown(
-      { headers: { Authorization: "Bearer ${KEY}" }, list: ["${KEY}"] },
-      { KEY: "k" },
+      { headers: { Authorization: "${TOKEN}" }, list: ["${KEY}"] },
+      { TOKEN: "******", KEY: "k" },
     );
-    assert.deepEqual(out, { headers: { Authorization: "Bearer k" }, list: ["k"] });
+    assert.deepEqual(out, { headers: { Authorization: "******" }, list: ["k"] });
   });
 });
 
@@ -75,6 +75,8 @@ describe("resolve defaults", () => {
     assert.equal(resolveModel({ model: "auto" }, { MIND_CURSOR_MODEL: "other" }), "auto");
     assert.equal(resolveModel({}, { MIND_CURSOR_MODEL: "auto" }), "auto");
     assert.equal(resolveModel({}, {}), "composer-2.5");
+    assert.equal(resolveModel({ model: "  " }, { MIND_CURSOR_MODEL: "auto" }), "auto");
+    assert.equal(resolveModel({ model: "" }, {}), "composer-2.5");
   });
 
   it("merges nested local/cloud/customServers", () => {
@@ -116,7 +118,10 @@ describe("loadConfigFile", () => {
   it("throws with the absolute path when an explicit path is missing", async () => {
     await withTempDir(async (dir) => {
       const missing = join(dir, "nope.json");
-      assert.throws(() => loadConfigFile({ path: missing }), new RegExp(`config file not found: ${missing.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
+      assert.throws(
+        () => loadConfigFile({ path: missing }),
+        new RegExp(`config file not found: ${missing.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`),
+      );
     });
   });
 

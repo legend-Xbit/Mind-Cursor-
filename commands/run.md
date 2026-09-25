@@ -70,5 +70,5 @@ Exit codes: `0` finished, `1` startup (`CursorAgentError`), `2` run executed and
 
 - Success → `/status` or `resume` with a follow-up.
 - Exit 1 → fix key/config/network; honor `retryable` if present.
-- Exit 2 → inspect the transcript / git state; do not blindly retry (duplicate cloud runs).
+- Exit 2 or 3 → inspect the transcript / git state; do not blindly retry (duplicate cloud runs).
 - Need tools in Cursor chat → `/serve` and reload MCP.

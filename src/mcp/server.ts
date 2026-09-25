@@ -2,11 +2,11 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import { applyProfile, loadConfigFile, resolveModel, resolveRuntime } from "../config.ts";
-import { inspectAll, resolveMcpServers, summarizeTools } from "./registry.ts";
 import { redactServer, redactTool } from "../redact.ts";
-import { TOOL_PRESETS } from "./presets.ts";
-import { LAYER_VERSION } from "../version.ts";
 import type { createMindCursor as CreateMindCursorFn } from "../sdk/client.ts";
+import { LAYER_VERSION } from "../version.ts";
+import { TOOL_PRESETS } from "./presets.ts";
+import { inspectAll, resolveMcpServers, summarizeTools } from "./registry.ts";
 
 export type CreateMindCursorMcpServerDeps = {
   env?: NodeJS.ProcessEnv;
@@ -182,6 +182,7 @@ export function createMindCursorMcpServer(deps: CreateMindCursorMcpServerDeps = 
                 runId: result.runId,
                 status: result.status,
                 result: result.result,
+                error: result.error,
                 attached: Object.keys(layer.mcpServers()),
               },
               null,
@@ -201,15 +202,18 @@ export function createMindCursorMcpServer(deps: CreateMindCursorMcpServerDeps = 
       description:
         "Resume an existing agent by id and send a follow-up. Re-attaches MCP servers (they are not persisted across resume).",
       inputSchema: {
-        agentId: z.string().describe("Local agent-* id or cloud bc-* id"),
-        prompt: z.string(),
+        agentId: z.string().describe("Cursor agent id (e.g. agent_... or bc-... )"),
+        prompt: z.string().describe("Follow-up task for that agent"),
         profile: z.string().optional(),
-        runtime: z.enum(["local", "cloud"]).optional(),
       },
     },
-    async ({ agentId, prompt, profile, runtime }) => {
+    async ({ agentId, prompt, profile }) => {
       const createMindCursor = await resolveCreateMindCursor(createMindCursorOverride);
-      const layer = createMindCursor({ profile, runtime, env: resolved.env, configPath: resolved.configPath });
+      const layer = createMindCursor({
+        profile,
+        env: resolved.env,
+        configPath: resolved.configPath,
+      });
       const skipped = layer.untrustedCustomServerIds();
       if (skipped.length > 0) {
         return {
@@ -233,6 +237,8 @@ export function createMindCursorMcpServer(deps: CreateMindCursorMcpServerDeps = 
                 runId: result.runId,
                 status: result.status,
                 result: result.result,
+                error: result.error,
+                attached: Object.keys(layer.mcpServers()),
               },
               null,
               2,

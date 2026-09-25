@@ -14,6 +14,11 @@ export function exitCodeForStatus(status: string): number {
   return EXIT_OK;
 }
 
+/** Finished runs succeed; error and cancelled both mean the run did not complete. */
+export function exitCodeForRunStatus(status: string): number {
+  return status === "finished" ? EXIT_OK : EXIT_RUN_FAILED;
+}
+
 export function isCursorAgentError(error: unknown): error is {
   message: string;
   isRetryable?: boolean;

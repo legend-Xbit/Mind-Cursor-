@@ -5,7 +5,6 @@
     "autoCreatePR": true,
     "skipReviewerRequest": true
   },
-  "enabled": ["notion", "vercel", "github", "slack", "linear", "figma", "treg", "plain"],
   "includeUnauthenticated": false,
   "customServers": {},
   "profiles": {
