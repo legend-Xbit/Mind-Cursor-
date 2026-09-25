@@ -195,14 +195,16 @@ export class MindCursor {
   }
 
   private resumeOptions(
+    agentId: string,
     mcpServers: Record<string, McpServerConfig>,
     apiKey: string,
   ): Partial<AgentOptions> {
+    const isCloudAgent = agentId.startsWith("bc-");
     return {
       apiKey,
       model: { id: this.model },
       mcpServers,
-      ...(this.runtime === "local" ? { local: { cwd: this.cwd } } : {}),
+      ...(isCloudAgent ? { cloud: {} } : { local: { cwd: this.cwd } }),
     };
   }
 
@@ -214,7 +216,9 @@ export class MindCursor {
     const apiKey = this.assertReadyToRun(options.agentId ? "resume" : "create");
     const mcpServers = this.mcpServers();
     const createOptions = this.agentOptions(mcpServers, apiKey);
-    const resumeOptions = this.resumeOptions(mcpServers, apiKey);
+    const resumeOptions = options.agentId
+      ? this.resumeOptions(options.agentId, mcpServers, apiKey)
+      : undefined;
 
     try {
       const agent = options.agentId
