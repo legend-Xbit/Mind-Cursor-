@@ -8,6 +8,12 @@ import {
   resolveModel,
   resolveRuntime,
 } from "../src/config.ts";
+import type { HttpMcpServerConfig } from "../src/types.ts";
+
+function asHttp(server: unknown): HttpMcpServerConfig {
+  assert.ok(server && typeof server === "object" && "url" in server, "expected an http/sse server config");
+  return server as HttpMcpServerConfig;
+}
 
 describe("interpolateEnv", () => {
   it("replaces ${NAME} from the provided env", () => {
@@ -73,7 +79,7 @@ describe("resolve defaults", () => {
       { local: { cwd: "/b" }, customServers: { b: { url: "https://b" } } },
     );
     assert.equal(merged.local?.cwd, "/b");
-    assert.equal(merged.customServers?.a?.url, "https://a");
-    assert.equal(merged.customServers?.b?.url, "https://b");
+    assert.equal(asHttp(merged.customServers?.a).url, "https://a");
+    assert.equal(asHttp(merged.customServers?.b).url, "https://b");
   });
 });

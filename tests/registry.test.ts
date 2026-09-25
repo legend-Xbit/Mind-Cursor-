@@ -2,8 +2,14 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { inspectAll, inspectPreset, resolveMcpServers, summarizeTools } from "../src/mcp/registry.ts";
 import { getPreset } from "../src/mcp/presets.ts";
+import type { HttpMcpServerConfig, McpServerConfig } from "../src/types.ts";
 
 const emptyEnv: NodeJS.ProcessEnv = {};
+
+function asHttp(server: McpServerConfig | undefined): HttpMcpServerConfig {
+  assert.ok(server && "url" in server, "expected an http/sse server config");
+  return server;
+}
 
 describe("inspectPreset", () => {
   it("marks Treg as needs_config without a URL", () => {
@@ -19,7 +25,7 @@ describe("inspectPreset", () => {
     assert.ok(notion);
     const resolved = inspectPreset(notion, emptyEnv);
     assert.equal(resolved.status, "needs_auth");
-    assert.equal(resolved.server?.url, "https://mcp.notion.com/mcp");
+    assert.equal(asHttp(resolved.server).url, "https://mcp.notion.com/mcp");
   });
 
   it("marks Notion ready when a token is present", () => {
@@ -41,7 +47,7 @@ describe("inspectPreset", () => {
       VERCEL_TOKEN: "v_test",
       VERCEL_MCP_URL: "https://mcp.vercel.com/team/example",
     });
-    assert.equal(resolved.server?.url, "https://mcp.vercel.com/team/example");
+    assert.equal(asHttp(resolved.server).url, "https://mcp.vercel.com/team/example");
   });
 
   it("builds Figma OAuth auth when client id is set", () => {
@@ -52,7 +58,7 @@ describe("inspectPreset", () => {
       FIGMA_CLIENT_SECRET: "fig_secret",
     });
     assert.equal(resolved.status, "ready");
-    assert.deepEqual(resolved.server?.auth, {
+    assert.deepEqual(asHttp(resolved.server).auth, {
       CLIENT_ID: "fig_id",
       CLIENT_SECRET: "fig_secret",
       scopes: ["file_content:read"],

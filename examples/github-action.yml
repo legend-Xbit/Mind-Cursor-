@@ -1,5 +1,10 @@
 # Example CI step — copy into .github/workflows when you want a one-shot agent.
 # Requires repo secrets: CURSOR_API_KEY, and any tool tokens you want attached.
+#
+# The `ci` profile runs on the local runtime, so the agent edits files inside
+# this ephemeral checkout only. Nothing is committed, pushed, or turned into a
+# PR by this workflow — add the optional artifact-upload step below (or your
+# own commit/push step) if you want the diff to leave the runner.
 name: mind-cursor
 on:
   workflow_dispatch:
@@ -16,9 +21,20 @@ jobs:
         with:
           node-version: "22"
       - run: npm ci
-      - run: npx tsx src/cli.ts run "${{ inputs.prompt }}" --profile ci --no-stream
+      - run: npx tsx src/cli.ts run "$PROMPT" --profile ci --no-stream
         env:
+          # inputs.prompt goes through env, not `${{ }}` interpolation, so
+          # quotes or `$(...)` in the prompt are neither injected into the
+          # shell nor mis-parsed.
+          PROMPT: ${{ inputs.prompt }}
           CURSOR_API_KEY: ${{ secrets.CURSOR_API_KEY }}
           NOTION_API_KEY: ${{ secrets.NOTION_API_KEY }}
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # Optional: surface what the agent changed, since the `ci` profile
+      # never commits or pushes on its own.
+      # - run: git diff --stat && git diff > agent.patch
+      # - uses: actions/upload-artifact@v4
+      #   with:
+      #     name: agent-patch
+      #     path: agent.patch
