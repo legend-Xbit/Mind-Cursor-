@@ -85,7 +85,7 @@ describe("MindCursor.send contracts", () => {
     assertNoLeakedSecrets(JSON.stringify(result));
   });
 
-  it("passes mcpServers and cloud options to Agent.resume without requiring repos", async () => {
+  it("passes mcpServers to Agent.resume without requiring cloud repos", async () => {
     const cloud = createMindCursor({
       apiKey: "cursor_test_key",
       runtime: "cloud",
@@ -97,7 +97,7 @@ describe("MindCursor.send contracts", () => {
     assert.equal(createMock.mock.callCount(), 0);
     assert.equal(lastResume?.agentId, "bc-99");
     assert.ok(lastResume?.options?.mcpServers);
-    assert.ok(lastResume?.options?.cloud);
+    assert.equal(lastResume?.options?.cloud, undefined);
     assert.equal(result.status, "finished");
   });
 

@@ -194,6 +194,18 @@ export class MindCursor {
     };
   }
 
+  private resumeOptions(
+    mcpServers: Record<string, McpServerConfig>,
+    apiKey: string,
+  ): Partial<AgentOptions> {
+    return {
+      apiKey,
+      model: { id: this.model },
+      mcpServers,
+      ...(this.runtime === "local" ? { local: { cwd: this.cwd } } : {}),
+    };
+  }
+
   async prompt(message: string): Promise<MindRunResult> {
     return this.send(message, { stream: false });
   }
@@ -201,12 +213,13 @@ export class MindCursor {
   async send(message: string, options: { stream?: boolean; agentId?: string } = {}): Promise<MindRunResult> {
     const apiKey = this.assertReadyToRun(options.agentId ? "resume" : "create");
     const mcpServers = this.mcpServers();
-    const agentOptions = this.agentOptions(mcpServers, apiKey);
+    const createOptions = this.agentOptions(mcpServers, apiKey);
+    const resumeOptions = this.resumeOptions(mcpServers, apiKey);
 
     try {
       const agent = options.agentId
-        ? await Agent.resume(options.agentId, agentOptions)
-        : await Agent.create(agentOptions);
+        ? await Agent.resume(options.agentId, resumeOptions)
+        : await Agent.create(createOptions);
 
       try {
         const run = await agent.send(message);
