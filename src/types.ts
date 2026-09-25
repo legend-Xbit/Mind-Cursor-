@@ -50,7 +50,9 @@ export type MindCursorConfig = {
     skipReviewerRequest?: boolean;
   };
   /**
-   * Built-in preset ids to attach. Empty / omitted = every preset.
+   * Built-in preset ids to consider. Empty / omitted means every preset is
+   * considered, but only presets that resolve to a ready/attachable server are
+   * ultimately attached.
    * Custom servers under `customServers` are always attached unless listed in `disabled`.
    */
   enabled?: string[];

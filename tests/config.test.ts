@@ -21,16 +21,16 @@ function asHttp(server: unknown): HttpMcpServerConfig {
 
 describe("interpolateEnv", () => {
   it("replaces ${NAME} from the provided env", () => {
-    assert.equal(interpolateEnv("${TOKEN}", { TOKEN: "abc" }), "abc");
+    assert.equal(interpolateEnv("token=${TOKEN}", { TOKEN: "abc" }), "token=abc");
     assert.equal(interpolateEnv("${MISSING}", {}), "");
   });
 
   it("walks nested objects", () => {
     const out = interpolateUnknown(
-      { headers: { Authorization: "${TOKEN}" }, list: ["${KEY}"] },
-      { TOKEN: "******", KEY: "k" },
+      { headers: { Authorization: "token ${TOKEN}" }, list: ["prefix-${KEY}-suffix"] },
+      { TOKEN: "abc", KEY: "k" },
     );
-    assert.deepEqual(out, { headers: { Authorization: "******" }, list: ["k"] });
+    assert.deepEqual(out, { headers: { Authorization: "token abc" }, list: ["prefix-k-suffix"] });
   });
 });
 
