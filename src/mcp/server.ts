@@ -205,9 +205,13 @@ export function createMindCursorMcpServer(deps: CreateMindCursorMcpServerDeps = 
         agentId: z.string().describe("Cursor agent id (e.g. agent_... or bc-... )"),
         prompt: z.string().describe("Follow-up task for that agent"),
         profile: z.string().optional(),
+        runtime: z
+          .enum(["local", "cloud"])
+          .optional()
+          .describe("Accepted for backward compatibility; resume infers runtime from the existing agent id."),
       },
     },
-    async ({ agentId, prompt, profile }) => {
+    async ({ agentId, prompt, profile, runtime: _runtime }) => {
       const createMindCursor = await resolveCreateMindCursor(createMindCursorOverride);
       const layer = createMindCursor({
         profile,
