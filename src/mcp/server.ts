@@ -2,21 +2,46 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import { applyProfile, loadConfigFile, resolveModel, resolveRuntime } from "../config.ts";
-import { redactMcpServers, toPublicTools } from "./redact.ts";
-import { inspectAll, resolveMcpServers, summarizeTools } from "./registry.ts";
-import { TOOL_PRESETS } from "./presets.ts";
+import { redactServer, redactTool } from "../redact.ts";
+import type { createMindCursor as CreateMindCursorFn } from "../sdk/client.ts";
 import { LAYER_VERSION } from "../version.ts";
+import { TOOL_PRESETS } from "./presets.ts";
+import { inspectAll, resolveMcpServers, summarizeTools } from "./registry.ts";
 
-function loadLayer(profile?: string) {
-  const config = applyProfile(loadConfigFile(), profile);
-  const runtime = resolveRuntime(config);
-  const model = resolveModel(config);
-  const tools = inspectAll({ config, runtime });
-  const servers = resolveMcpServers({ config, runtime });
-  return { config, runtime, model, tools, servers };
+export type CreateMindCursorMcpServerDeps = {
+  env?: NodeJS.ProcessEnv;
+  configPath?: string;
+  createMindCursor?: typeof CreateMindCursorFn;
+};
+
+function resolveDeps(deps: CreateMindCursorMcpServerDeps): { env: NodeJS.ProcessEnv; configPath?: string } {
+  const env = deps.env ?? process.env;
+  return { env, configPath: deps.configPath ?? env.MIND_CURSOR_CONFIG };
 }
 
-export function createMindCursorMcpServer(): McpServer {
+function loadLayer(deps: { env: NodeJS.ProcessEnv; configPath?: string }, profile?: string) {
+  const loaded = loadConfigFile({ path: deps.configPath, env: deps.env });
+  const config = applyProfile(loaded.config, profile);
+  const runtime = resolveRuntime(config, undefined, deps.env);
+  const model = resolveModel(config, deps.env);
+  const trustCustomServers =
+    loaded.source === "explicit" || deps.env.MIND_CURSOR_TRUST_CONFIG === "1";
+  const tools = inspectAll({ env: deps.env, config, runtime, trustCustomServers, configPath: loaded.path });
+  const servers = resolveMcpServers({ env: deps.env, config, runtime, trustCustomServers, configPath: loaded.path });
+  return { config, runtime, model, tools, servers, configPath: loaded.path, trustCustomServers };
+}
+
+async function resolveCreateMindCursor(override?: typeof CreateMindCursorFn): Promise<typeof CreateMindCursorFn> {
+  if (override) {
+    return override;
+  }
+  const mod = await import("../sdk/client.ts");
+  return mod.createMindCursor;
+}
+
+export function createMindCursorMcpServer(deps: CreateMindCursorMcpServerDeps = {}): McpServer {
+  const resolved = resolveDeps(deps);
+  const createMindCursorOverride = deps.createMindCursor;
   const server = new McpServer({
     name: "mind-cursor",
     version: LAYER_VERSION,
@@ -32,7 +57,7 @@ export function createMindCursorMcpServer(): McpServer {
       },
     },
     async ({ profile }) => {
-      const layer = loadLayer(profile);
+      const layer = loadLayer(resolved, profile);
       const summary = summarizeTools(layer.tools);
       return {
         content: [
@@ -62,15 +87,15 @@ export function createMindCursorMcpServer(): McpServer {
     {
       title: "List MCP tool adapters",
       description:
-        "List Notion, Vercel, GitHub, Slack, Linear, Figma, Treg, Plain, and custom MCP adapters with ready / needs_auth / needs_config status.",
+        "List Notion, Vercel, GitHub, Slack, Linear, Figma, Treg, Plain, and custom MCP adapters with ready / needs_auth / needs_config status. Server URLs and header/env/arg secrets are redacted to key names only — see mind_resolve_mcp for the shape.",
       inputSchema: {
         profile: z.string().optional(),
       },
     },
     async ({ profile }) => {
-      const layer = loadLayer(profile);
+      const layer = loadLayer(resolved, profile);
       return {
-        content: [{ type: "text", text: JSON.stringify(toPublicTools(layer.tools), null, 2) }],
+        content: [{ type: "text", text: JSON.stringify(layer.tools.map(redactTool), null, 2) }],
       };
     },
   );
@@ -80,7 +105,7 @@ export function createMindCursorMcpServer(): McpServer {
     {
       title: "Resolve MCP servers for a Cursor SDK agent",
       description:
-        "Build the mcpServers object to pass to Agent.create / Agent.prompt / Agent.resume. Secrets stay in env; this returns redacted URLs and header keys.",
+        "Build the mcpServers object that would be passed to Agent.create / Agent.prompt / Agent.resume, redacted for display: header/env/CLIENT_SECRET values become key-name lists (headerKeys/envKeys/authKeys), URLs have userinfo and query stripped and opaque path segments blanked, and stdio args after a --token/--key/-H style flag are blanked. Actual secret values never leave the process through this tool.",
       inputSchema: {
         profile: z.string().optional(),
         includeUnauthenticated: z
@@ -90,17 +115,24 @@ export function createMindCursorMcpServer(): McpServer {
       },
     },
     async ({ profile, includeUnauthenticated }) => {
-      const config = applyProfile(loadConfigFile(), profile);
-      const runtime = resolveRuntime(config);
-      const servers = redactMcpServers(
-        resolveMcpServers({
-          config,
-          runtime,
-          includeUnauthenticated,
-        }),
+      const loaded = loadConfigFile({ path: resolved.configPath, env: resolved.env });
+      const config = applyProfile(loaded.config, profile);
+      const runtime = resolveRuntime(config, undefined, resolved.env);
+      const trustCustomServers =
+        loaded.source === "explicit" || resolved.env.MIND_CURSOR_TRUST_CONFIG === "1";
+      const servers = resolveMcpServers({
+        env: resolved.env,
+        config,
+        runtime,
+        includeUnauthenticated,
+        trustCustomServers,
+        configPath: loaded.path,
+      });
+      const redacted = Object.fromEntries(
+        Object.entries(servers).map(([id, server]) => [id, redactServer(server)]),
       );
       return {
-        content: [{ type: "text", text: JSON.stringify({ runtime, servers }, null, 2) }],
+        content: [{ type: "text", text: JSON.stringify({ runtime, servers: redacted }, null, 2) }],
       };
     },
   );
@@ -119,12 +151,26 @@ export function createMindCursorMcpServer(): McpServer {
       },
     },
     async ({ prompt, profile, runtime, model }) => {
-      const { createMindCursor } = await import("../sdk/client.ts");
+      const createMindCursor = await resolveCreateMindCursor(createMindCursorOverride);
       const layer = createMindCursor({
         profile,
         runtime,
         model,
+        env: resolved.env,
+        configPath: resolved.configPath,
       });
+      const skipped = layer.untrustedCustomServerIds();
+      if (skipped.length > 0) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: `skipped untrusted custom servers from ${layer.configPath ?? "(no config file)"}: ${skipped.join(", ")} — set MIND_CURSOR_TRUST_CONFIG=1 to trust them`,
+            },
+          ],
+          isError: true,
+        };
+      }
       const result = await layer.prompt(prompt);
       return {
         content: [
@@ -156,15 +202,34 @@ export function createMindCursorMcpServer(): McpServer {
       description:
         "Resume an existing agent by id and send a follow-up. Re-attaches MCP servers (they are not persisted across resume).",
       inputSchema: {
-        agentId: z.string().describe("Local agent-* id or cloud bc-* id"),
-        prompt: z.string(),
+        agentId: z.string().describe("Cursor agent id (e.g. agent_... or bc-... )"),
+        prompt: z.string().describe("Follow-up task for that agent"),
         profile: z.string().optional(),
-        runtime: z.enum(["local", "cloud"]).optional(),
+        runtime: z
+          .enum(["local", "cloud"])
+          .optional()
+          .describe("Accepted for backward compatibility; resume infers runtime from the existing agent id."),
       },
     },
-    async ({ agentId, prompt, profile, runtime }) => {
-      const { createMindCursor } = await import("../sdk/client.ts");
-      const layer = createMindCursor({ profile, runtime });
+    async ({ agentId, prompt, profile, runtime: _runtime }) => {
+      const createMindCursor = await resolveCreateMindCursor(createMindCursorOverride);
+      const layer = createMindCursor({
+        profile,
+        env: resolved.env,
+        configPath: resolved.configPath,
+      });
+      const skipped = layer.untrustedCustomServerIds();
+      if (skipped.length > 0) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: `skipped untrusted custom servers from ${layer.configPath ?? "(no config file)"}: ${skipped.join(", ")} — set MIND_CURSOR_TRUST_CONFIG=1 to trust them`,
+            },
+          ],
+          isError: true,
+        };
+      }
       const result = await layer.send(prompt, { agentId, stream: false });
       return {
         content: [
@@ -177,6 +242,7 @@ export function createMindCursorMcpServer(): McpServer {
                 status: result.status,
                 result: result.result,
                 error: result.error,
+                attached: Object.keys(layer.mcpServers()),
               },
               null,
               2,

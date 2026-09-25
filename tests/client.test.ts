@@ -82,13 +82,14 @@ describe("MindCursor.send contracts", () => {
     assert.equal(lastResume?.agentId, "agent-99");
     assert.ok(lastResume?.options?.mcpServers);
     assert.ok(lastResume.options.mcpServers.notion);
+    assert.deepEqual(lastResume.options.local, { cwd: layer().cwd });
+    assert.equal(lastResume.options.cloud, undefined);
     assertNoLeakedSecrets(JSON.stringify(result));
   });
 
-  it("passes mcpServers and cloud options to Agent.resume without requiring repos", async () => {
+  it("infers cloud resume options from a bc- agent id without requiring repos", async () => {
     const cloud = createMindCursor({
       apiKey: "cursor_test_key",
-      runtime: "cloud",
       config: {},
       env: { CURSOR_API_KEY: "cursor_test_key" },
     });
@@ -97,7 +98,8 @@ describe("MindCursor.send contracts", () => {
     assert.equal(createMock.mock.callCount(), 0);
     assert.equal(lastResume?.agentId, "bc-99");
     assert.ok(lastResume?.options?.mcpServers);
-    assert.ok(lastResume?.options?.cloud);
+    assert.deepEqual(lastResume?.options?.cloud, {});
+    assert.equal(lastResume?.options?.local, undefined);
     assert.equal(result.status, "finished");
   });
 

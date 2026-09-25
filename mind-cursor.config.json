@@ -1,9 +1,6 @@
 {
   "model": "composer-2.5",
   "runtime": "local",
-  "local": {
-    "cwd": "."
-  },
   "cloud": {
     "autoCreatePR": true,
     "skipReviewerRequest": true

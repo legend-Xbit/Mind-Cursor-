@@ -1,6 +1,8 @@
+import { resolve } from "node:path";
 import { Agent, CursorAgentError, type AgentOptions } from "@cursor/sdk";
 import { applyProfile, loadConfigFile, resolveModel, resolveRuntime } from "../config.ts";
 import { toPublicTools, type PublicResolvedTool } from "../mcp/redact.ts";
+import { getPreset } from "../mcp/presets.ts";
 import { inspectAll, resolveMcpServers, summarizeTools } from "../mcp/registry.ts";
 import type { CloudRepoConfig, McpServerConfig, MindCursorConfig, ResolvedTool, RuntimeKind } from "../types.ts";
 import { formatStartupError } from "./errors.ts";
@@ -8,6 +10,13 @@ import { writeAssistantStream } from "./run.ts";
 
 export type MindCursorOptions = {
   apiKey?: string;
+  /**
+   * A config object supplied directly by the caller. Bypasses file lookup
+   * entirely and is trusted by construction (the caller authored it in
+   * code) — `customServers` on it always attaches, regardless of
+   * `trustConfig`. Note: unlike a loaded file, this is NOT run through
+   * `${VAR}` interpolation.
+   */
   config?: MindCursorConfig;
   configPath?: string;
   profile?: string;
@@ -17,6 +26,14 @@ export type MindCursorOptions = {
   env?: NodeJS.ProcessEnv;
   includeUnauthenticated?: boolean;
   stream?: boolean;
+  /**
+   * Trust `config.customServers` from a config file that was only
+   * discovered (not pointed to explicitly via `configPath` or
+   * `MIND_CURSOR_CONFIG`) enough to run its stdio commands / attach its
+   * HTTP servers. Defaults to false. Also settable via
+   * `MIND_CURSOR_TRUST_CONFIG=1`.
+   */
+  trustConfig?: boolean;
 };
 
 export type MindRunError = {
@@ -47,6 +64,8 @@ function readApiKey(options: MindCursorOptions, env: NodeJS.ProcessEnv): string 
 
 export class MindCursor {
   readonly config: MindCursorConfig;
+  readonly configPath: string | undefined;
+  readonly trustCustomServers: boolean;
   readonly runtime: RuntimeKind;
   readonly model: string;
   readonly apiKey: string | undefined;
@@ -56,14 +75,45 @@ export class MindCursor {
 
   constructor(options: MindCursorOptions = {}) {
     this.env = options.env ?? process.env;
-    const loaded = options.config ?? loadConfigFile(options.configPath, this.env);
-    this.config = applyProfile(loaded, options.profile);
+
+    let rawConfig: MindCursorConfig;
+    let configDir: string | undefined;
+    let trustedBySource = true;
+    if (options.config) {
+      rawConfig = options.config;
+      this.configPath = undefined;
+    } else {
+      const loaded = loadConfigFile({ path: options.configPath, env: this.env });
+      rawConfig = loaded.config;
+      configDir = loaded.dir;
+      this.configPath = loaded.path;
+      trustedBySource = loaded.source === "explicit";
+    }
+
+    this.config = applyProfile(rawConfig, options.profile);
+    this.trustCustomServers =
+      trustedBySource || options.trustConfig === true || this.env.MIND_CURSOR_TRUST_CONFIG === "1";
     this.runtime = resolveRuntime(this.config, options.runtime, this.env);
     this.model = options.model?.trim() || resolveModel(this.config, this.env);
     this.apiKey = readApiKey(options, this.env);
-    this.cwd = options.cwd ?? this.config.local?.cwd ?? process.cwd();
+    this.cwd = resolve(configDir ?? process.cwd(), options.cwd ?? this.config.local?.cwd ?? ".");
     this.includeUnauthenticated =
       options.includeUnauthenticated ?? this.config.includeUnauthenticated ?? false;
+
+    const skipped = this.untrustedCustomServerIds();
+    if (skipped.length > 0) {
+      process.stderr.write(
+        `skipped untrusted custom servers from ${this.configPath ?? "(no config file)"}: ${skipped.join(", ")} (pass --trust-config)\n`,
+      );
+    }
+  }
+
+  /** Custom server ids present in config that were skipped because the config file is untrusted. */
+  untrustedCustomServerIds(): string[] {
+    if (this.trustCustomServers) {
+      return [];
+    }
+    return Object.keys(this.config.customServers ?? {}).filter((id) => !getPreset(id));
   }
 
   private requireApiKey(): string {
@@ -90,8 +140,6 @@ export class MindCursor {
 
   private assertReadyToRun(kind: "create" | "resume" = "create"): string {
     const apiKey = this.requireApiKey();
-    // Resume reattaches to an existing agent (runtime is inferred from the id).
-    // Requiring repos here blocked `resume bc-…` when only the agent id is known.
     if (kind === "create" && this.runtime === "cloud" && this.cloudRepos().length === 0) {
       throw new Error(CLOUD_REPO_REQUIRED);
     }
@@ -104,6 +152,8 @@ export class MindCursor {
       config: this.config,
       runtime: this.runtime,
       includeUnauthenticated: this.includeUnauthenticated,
+      trustCustomServers: this.trustCustomServers,
+      configPath: this.configPath,
     });
   }
 
@@ -113,6 +163,8 @@ export class MindCursor {
       config: this.config,
       runtime: this.runtime,
       includeUnauthenticated: this.includeUnauthenticated,
+      trustCustomServers: this.trustCustomServers,
+      configPath: this.configPath,
     });
   }
 
@@ -142,6 +194,20 @@ export class MindCursor {
     };
   }
 
+  private resumeOptions(
+    agentId: string,
+    mcpServers: Record<string, McpServerConfig>,
+    apiKey: string,
+  ): Partial<AgentOptions> {
+    const isCloudAgent = agentId.startsWith("bc-");
+    return {
+      apiKey,
+      model: { id: this.model },
+      mcpServers,
+      ...(isCloudAgent ? { cloud: {} } : { local: { cwd: this.cwd } }),
+    };
+  }
+
   async prompt(message: string): Promise<MindRunResult> {
     return this.send(message, { stream: false });
   }
@@ -149,12 +215,15 @@ export class MindCursor {
   async send(message: string, options: { stream?: boolean; agentId?: string } = {}): Promise<MindRunResult> {
     const apiKey = this.assertReadyToRun(options.agentId ? "resume" : "create");
     const mcpServers = this.mcpServers();
-    const agentOptions = this.agentOptions(mcpServers, apiKey);
+    const createOptions = this.agentOptions(mcpServers, apiKey);
+    const resumeOptions = options.agentId
+      ? this.resumeOptions(options.agentId, mcpServers, apiKey)
+      : undefined;
 
     try {
       const agent = options.agentId
-        ? await Agent.resume(options.agentId, agentOptions)
-        : await Agent.create(agentOptions);
+        ? await Agent.resume(options.agentId, resumeOptions)
+        : await Agent.create(createOptions);
 
       try {
         const run = await agent.send(message);

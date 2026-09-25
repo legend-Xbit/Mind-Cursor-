@@ -1,6 +1,18 @@
+export const EXIT_OK = 0;
 export const EXIT_STARTUP_FAILED = 1;
 export const EXIT_RUN_FAILED = 2;
-export const EXIT_OK = 0;
+export const EXIT_RUN_CANCELLED = 3;
+
+/** Map an SDK run status ("finished" | "error" | "cancelled") to a CLI exit code. */
+export function exitCodeForStatus(status: string): number {
+  if (status === "error") {
+    return EXIT_RUN_FAILED;
+  }
+  if (status === "cancelled") {
+    return EXIT_RUN_CANCELLED;
+  }
+  return EXIT_OK;
+}
 
 /** Finished runs succeed; error and cancelled both mean the run did not complete. */
 export function exitCodeForRunStatus(status: string): number {

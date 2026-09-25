@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
-import { describe, it } from "node:test";
-import { mkdtemp, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve as resolvePath } from "node:path";
+import { describe, it } from "node:test";
 import {
   applyProfile,
   interpolateEnv,
@@ -12,19 +12,25 @@ import {
   resolveModel,
   resolveRuntime,
 } from "../src/config.ts";
+import type { HttpMcpServerConfig } from "../src/types.ts";
+
+function asHttp(server: unknown): HttpMcpServerConfig {
+  assert.ok(server && typeof server === "object" && "url" in server, "expected an http/sse server config");
+  return server as HttpMcpServerConfig;
+}
 
 describe("interpolateEnv", () => {
   it("replaces ${NAME} from the provided env", () => {
-    assert.equal(interpolateEnv("Bearer ${TOKEN}", { TOKEN: "abc" }), "Bearer abc");
+    assert.equal(interpolateEnv("token=${TOKEN}", { TOKEN: "abc" }), "token=abc");
     assert.equal(interpolateEnv("${MISSING}", {}), "");
   });
 
   it("walks nested objects", () => {
     const out = interpolateUnknown(
-      { headers: { Authorization: "Bearer ${KEY}" }, list: ["${KEY}"] },
-      { KEY: "k" },
+      { headers: { Authorization: "token ${TOKEN}" }, list: ["prefix-${KEY}-suffix"] },
+      { TOKEN: "abc", KEY: "k" },
     );
-    assert.deepEqual(out, { headers: { Authorization: "Bearer k" }, list: ["k"] });
+    assert.deepEqual(out, { headers: { Authorization: "token abc" }, list: ["prefix-k-suffix"] });
   });
 });
 
@@ -79,53 +85,81 @@ describe("resolve defaults", () => {
       { local: { cwd: "/b" }, customServers: { b: { url: "https://b" } } },
     );
     assert.equal(merged.local?.cwd, "/b");
-    assert.equal(merged.customServers?.a?.url, "https://a");
-    assert.equal(merged.customServers?.b?.url, "https://b");
+    assert.equal(asHttp(merged.customServers?.a).url, "https://a");
+    assert.equal(asHttp(merged.customServers?.b).url, "https://b");
   });
 });
 
 describe("loadConfigFile", () => {
-  it("returns empty config when the default file is missing", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "mind-cursor-noconfig-"));
-    const previous = process.cwd();
-    process.chdir(dir);
+  async function withTempDir<T>(fn: (dir: string) => Promise<T>): Promise<T> {
+    const dir = await mkdtemp(join(tmpdir(), "mind-cursor-config-"));
     try {
-      assert.deepEqual(loadConfigFile(undefined, {}), {});
+      return await fn(dir);
     } finally {
-      process.chdir(previous);
+      await rm(dir, { recursive: true, force: true });
     }
+  }
+
+  it("reports source 'none' and an empty config when the discovered path is missing", async () => {
+    await withTempDir(async (dir) => {
+      const previousCwd = process.cwd();
+      process.chdir(dir);
+      try {
+        const loaded = loadConfigFile({ env: {} });
+        assert.equal(loaded.source, "none");
+        assert.deepEqual(loaded.config, {});
+        assert.equal(loaded.path, resolvePath(dir, "mind-cursor.config.json"));
+      } finally {
+        process.chdir(previousCwd);
+      }
+    });
   });
 
-  it("throws when an explicit path does not exist", () => {
-    assert.throws(
-      () => loadConfigFile(join(tmpdir(), "mind-cursor-missing-config.json")),
-      /mind-cursor config not found/,
-    );
+  it("throws with the absolute path when an explicit path is missing", async () => {
+    await withTempDir(async (dir) => {
+      const missing = join(dir, "nope.json");
+      assert.throws(
+        () => loadConfigFile({ path: missing }),
+        new RegExp(`config file not found: ${missing.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`),
+      );
+    });
   });
 
-  it("throws when MIND_CURSOR_CONFIG points at a missing file", () => {
-    assert.throws(
-      () =>
-        loadConfigFile(undefined, {
-          MIND_CURSOR_CONFIG: join(tmpdir(), "mind-cursor-env-missing.json"),
-        }),
-      /mind-cursor config not found/,
-    );
+  it("throws with the path on malformed JSON", async () => {
+    await withTempDir(async (dir) => {
+      const path = join(dir, "mind-cursor.config.json");
+      await writeFile(path, "{ not json");
+      assert.throws(() => loadConfigFile({ path }), (error: Error) => error.message.startsWith(`${resolvePath(path)}:`));
+    });
   });
 
-  it("throws a path-qualified error for invalid JSON", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "mind-cursor-config-"));
-    const path = join(dir, "mind-cursor.config.json");
-    await writeFile(path, "{ not json", "utf8");
-    assert.throws(() => loadConfigFile(path), /Invalid JSON in mind-cursor config/);
+  it("loads an explicit path, interpolates it, and reports source 'explicit'", async () => {
+    await withTempDir(async (dir) => {
+      const path = join(dir, "mind-cursor.config.json");
+      await writeFile(path, JSON.stringify({ customServers: { a: { type: "http", url: "${BASE}/mcp" } } }));
+      const loaded = loadConfigFile({ path, env: { BASE: "https://example.com" } });
+      assert.equal(loaded.source, "explicit");
+      assert.equal(loaded.path, resolvePath(path));
+      assert.equal(loaded.dir, dir);
+      assert.equal(asHttp(loaded.config.customServers?.a).url, "https://example.com/mcp");
+    });
   });
 
-  it("loads and interpolates an explicit config file", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "mind-cursor-config-"));
-    const path = join(dir, "mind-cursor.config.json");
-    await writeFile(path, JSON.stringify({ model: "${MODEL_ID}", runtime: "local" }), "utf8");
-    const loaded = loadConfigFile(path, { MODEL_ID: "composer-2.5" });
-    assert.equal(loaded.model, "composer-2.5");
-    assert.equal(loaded.runtime, "local");
+  it("reads the path named by the injected env, not process.env", async () => {
+    await withTempDir(async (dir) => {
+      const path = join(dir, "mind-cursor.config.json");
+      await writeFile(path, JSON.stringify({ model: "from-tmp" }));
+      const previous = process.env.MIND_CURSOR_CONFIG;
+      delete process.env.MIND_CURSOR_CONFIG;
+      try {
+        const loaded = loadConfigFile({ env: { MIND_CURSOR_CONFIG: path } });
+        assert.equal(loaded.config.model, "from-tmp");
+        assert.equal(loaded.source, "explicit");
+      } finally {
+        if (previous !== undefined) {
+          process.env.MIND_CURSOR_CONFIG = previous;
+        }
+      }
+    });
   });
 });

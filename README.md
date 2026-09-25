@@ -11,7 +11,7 @@ Cursor يحمّل سيرفرات MCP من مصادر متعددة، والأول
 1. تسجّل الأدوات الجاهزة فقط (token أو OAuth موجود).
 2. تبني `mcpServers` بنفس شكل SDK (`http` / `sse` / `stdio`).
 3. تعيد تمريرها في كل `create` و`resume`.
-4. تفرّق بين فشل الإقلاع (`CursorAgentError` → خروج 1) وفشل التشغيل (`status === "error"` → خروج 2).
+4. تفرّق بين فشل الإقلاع (`CursorAgentError` → خروج 1) وفشل التشغيل (`status === "error"` → خروج 2، `status === "cancelled"` → خروج 3).
 
 ## تثبيت
 
@@ -39,7 +39,15 @@ npx tsx src/cli.ts resume agent-... "حدّث سجل التغييرات"
 npx tsx src/cli.ts serve
 ```
 
-`list --json` and `resolve` print a redacted catalog (`hasHeaders` / `hasAuth`, never `Authorization` or `CLIENT_SECRET` values). `serve` يشغّل سيرفر MCP محلي (`mind_list_tools`, `mind_resolve_mcp`, `mind_run_agent`, `mind_resume_agent`). `mind_list_tools` uses the same redaction. ملف `.cursor/mcp.json` يربطه بهذا المشروع مع Notion وVercel وGitHub وSlack.
+`serve` يشغّل سيرفر MCP محلي (`mind_list_tools`, `mind_resolve_mcp`, `mind_layer_info`, `mind_run_agent`, `mind_resume_agent`). ملف `.cursor/mcp.json` يربطه بهذا المشروع مع Notion وVercel وGitHub وSlack.
+
+مخرجات `list` و`resolve` (والأدوات المقابلة في MCP) **محجوبة افتراضياً**: قيم الرؤوس (headers)، `CLIENT_SECRET`، ومتغيرات env تظهر كأسماء مفاتيح فقط (`headerKeys`, `envKeys`, `authKeys`) لا كقيم. مرّر `--reveal-secrets` لـ`list`/`resolve` لطباعة القيم الخام عند الحاجة الفعلية (يطبع تحذيراً على stderr).
+
+### مصدر الإعداد والثقة
+
+- `MIND_CURSOR_CONFIG=<path>` أو `--config <path>` يحدّدان ملف الإعداد صراحةً. غيابهما يجعل الطبقة تبحث عن `./mind-cursor.config.json` في مجلد العمل تلقائياً ("discovered").
+- مسار صريح (`--config` أو `MIND_CURSOR_CONFIG`) مفقود يوقف التنفيذ برسالة خطأ واضحة بدل التراجع الصامت للقيم الافتراضية. مسار "discovered" مفقود يمر بصمت (لا إعداد = القيم الافتراضية).
+- `config.customServers` من ملف **discovered** (غير محدَّد صراحةً) **غير موثوق افتراضياً**: أوامره (stdio) وروابطه (http) لا تُرفق، لأن `mind-cursor` قد يُشغَّل داخل أي مستودع مستنسَخ فيحاول ذلك المستودع تشغيل أوامره الخاصة. مرّر `--trust-config` أو `MIND_CURSOR_TRUST_CONFIG=1` لتوثيقها، أو أشر لملف الإعداد صراحةً عبر `--config`/`MIND_CURSOR_CONFIG` (يُعتبر التحديد الصريح توثيقاً تلقائياً).
 
 ## من الكود
 
@@ -48,6 +56,7 @@ import { createMindCursor } from "mind-cursor";
 
 const layer = createMindCursor({ runtime: "local" });
 const result = await layer.send("Find the bug in src/auth.ts");
+if (result.status === "cancelled") process.exit(3);
 if (result.status !== "finished") process.exit(2);
 ```
 
@@ -68,7 +77,7 @@ if (result.status !== "finished") process.exit(2);
 | `treg` | `TREG_MCP_URL` | needs_config |
 | `plain` | `PLAIN_MCP_URL` | needs_config |
 
-أضف سيرفرات خاصة تحت `customServers` في الإعداد. They attach automatically unless listed in `disabled`. `enabled` filters built-in presets only — you do not need to add a custom id there. على السحابة تُحذف `cwd` من إعدادات stdio لأن SDK يرفضها. Empty URL or stdio command after `${ENV}` expansion is `needs_config`; an empty `Authorization: Bearer …` header is `needs_auth`.
+أضف سيرفرات خاصة تحت `customServers` في الإعداد (راجع "مصدر الإعداد والثقة" أعلاه لشرط التوثيق). They attach automatically unless listed in `disabled`; `enabled` filters built-in presets only, so you do not need to add a custom id there. على السحابة تُحذف `cwd` من إعدادات stdio لأن SDK يرفضها. `local.cwd` (عند تحديده) يُحسَب نسبةً لمجلد ملف الإعداد، لا مجلد العمل الحالي. Empty URL or stdio command after `${ENV}` expansion is `needs_config`; an empty Authorization header after expansion is `needs_auth`.
 
 ## ملاحظات SDK
 

@@ -27,7 +27,7 @@ No destructive operations.
 
 ### MCP-first
 
-`mind_layer_info` and `mind_resolve_mcp` (redacted URLs and `hasHeaders` / `hasAuth` only).
+`mind_layer_info` and `mind_resolve_mcp` (redacted: `headerKeys` / `authKeys` / `envKeys` only, never values).
 
 ### CLI-fallback
 

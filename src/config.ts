@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
-import type { MindCursorConfig, RuntimeKind } from "./types.ts";
+import { dirname, resolve } from "node:path";
+import type { ConfigSource, LoadedConfig, MindCursorConfig, RuntimeKind } from "./types.ts";
 
 const ENV_PATTERN = /\$\{([A-Z0-9_]+)\}/g;
 
@@ -36,35 +36,56 @@ export function parseConfig(raw: unknown): MindCursorConfig {
   return raw as MindCursorConfig;
 }
 
-export function loadConfigFile(
-  path?: string,
-  env: NodeJS.ProcessEnv = process.env,
-): MindCursorConfig {
-  const configured = path ?? env.MIND_CURSOR_CONFIG;
-  const absolute = resolve(configured ?? "mind-cursor.config.json");
+export type LoadConfigOptions = {
+  /** Explicit config path (from `--config`, `configPath`, or similar). Takes priority over `env.MIND_CURSOR_CONFIG`. */
+  path?: string;
+  env?: NodeJS.ProcessEnv;
+};
+
+/**
+ * Load and interpolate the mind-cursor config file, reporting provenance.
+ *
+ * The path is resolved as: `options.path` (explicit) → `env.MIND_CURSOR_CONFIG`
+ * (explicit) → `./mind-cursor.config.json` (discovered by scanning the
+ * working directory). When the path was given explicitly and the file is
+ * missing, this throws — a typo'd `MIND_CURSOR_CONFIG` should fail loudly,
+ * not silently fall back to defaults. When the path was only discovered and
+ * is missing, an empty config with `source: "none"` is returned.
+ *
+ * `source` distinguishes "explicit" from "discovered": callers use it to
+ * decide whether `config.customServers` is trustworthy enough to run (see
+ * `ResolveOptions.trustCustomServers`).
+ */
+export function loadConfigFile(options: LoadConfigOptions = {}): LoadedConfig {
+  const env = options.env ?? process.env;
+  const explicit = options.path ?? env.MIND_CURSOR_CONFIG;
+  const source: ConfigSource = explicit ? "explicit" : "discovered";
+  const absolute = resolve(explicit ?? "mind-cursor.config.json");
+  const dir = dirname(absolute);
   let text: string;
   try {
     text = readFileSync(absolute, "utf8");
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code;
     if (code === "ENOENT") {
-      // Default path is optional. An explicit path (argument or MIND_CURSOR_CONFIG)
-      // must exist — otherwise a typo silently ran with empty config.
-      if (configured) {
-        throw new Error(`mind-cursor config not found: ${absolute}`);
+      if (source === "explicit") {
+        throw new Error(`config file not found: ${absolute}`);
       }
-      return {};
+      return { config: {}, path: absolute, dir, source: "none" };
     }
     throw error;
   }
+
+  let raw: unknown;
   try {
-    return interpolateUnknown(parseConfig(JSON.parse(text)), env) as MindCursorConfig;
+    raw = JSON.parse(text);
   } catch (error) {
-    if (error instanceof SyntaxError) {
-      throw new Error(`Invalid JSON in mind-cursor config ${absolute}: ${error.message}`);
-    }
-    throw error;
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`${absolute}: ${message}`);
   }
+  const parsed = parseConfig(raw);
+  const config = interpolateUnknown(parsed, env) as MindCursorConfig;
+  return { config, path: absolute, dir, source };
 }
 
 export function mergeConfig(
