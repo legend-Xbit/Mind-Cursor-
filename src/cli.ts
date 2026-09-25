@@ -2,7 +2,7 @@
 import { applyProfile, loadConfigFile, resolveModel, resolveRuntime } from "./config.ts";
 import { inspectAll, resolveMcpServers, summarizeTools } from "./mcp/registry.ts";
 import { redactServer, redactTool } from "./redact.ts";
-import { EXIT_OK, EXIT_RUN_FAILED, EXIT_STARTUP_FAILED, formatStartupError } from "./sdk/errors.ts";
+import { EXIT_OK, EXIT_STARTUP_FAILED, exitCodeForStatus, formatStartupError } from "./sdk/errors.ts";
 import type { RuntimeKind } from "./types.ts";
 import { LAYER_VERSION } from "./version.ts";
 
@@ -14,7 +14,8 @@ type Flags = {
   model?: string;
   configPath?: string;
   stream: boolean;
-  includeUnauthenticated: boolean;
+  /** Undefined unless --include-unauthenticated is passed, so it falls through to config.includeUnauthenticated instead of clobbering it with a hardcoded false. */
+  includeUnauthenticated?: boolean;
   json: boolean;
   trustConfig: boolean;
   revealSecrets: boolean;
@@ -40,6 +41,8 @@ Environment:
   CURSOR_API_KEY          required for run / resume
   MIND_CURSOR_CONFIG      path to mind-cursor.config.json (same as --config)
   MIND_CURSOR_TRUST_CONFIG=1  same as --trust-config
+
+Exit codes (run / resume): 0 finished, 1 startup failed, 2 run failed, 3 run cancelled.
 `;
 }
 
@@ -48,7 +51,6 @@ function parseArgs(argv: string[]): Flags {
     command: argv[0] ?? "help",
     args: [],
     stream: true,
-    includeUnauthenticated: false,
     json: false,
     trustConfig: false,
     revealSecrets: false,
@@ -190,7 +192,7 @@ async function main(): Promise<number> {
       process.stdout.write("\n");
     }
     process.stderr.write(`status=${result.status} agent=${result.agentId} run=${result.runId ?? ""}\n`);
-    return result.status === "error" ? EXIT_RUN_FAILED : EXIT_OK;
+    return exitCodeForStatus(result.status);
   }
 
   process.stderr.write(usage());

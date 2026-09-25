@@ -189,7 +189,7 @@ export function createMindCursorMcpServer(deps: CreateMindCursorMcpServerDeps = 
             ),
           },
         ],
-        isError: result.status === "error",
+        isError: result.status !== "finished",
       };
     },
   );
@@ -239,7 +239,7 @@ export function createMindCursorMcpServer(deps: CreateMindCursorMcpServerDeps = 
             ),
           },
         ],
-        isError: result.status === "error",
+        isError: result.status !== "finished",
       };
     },
   );

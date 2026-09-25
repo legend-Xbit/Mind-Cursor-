@@ -183,6 +183,27 @@ describe("createMindCursorMcpServer", () => {
     });
   });
 
+  it("mind_run_agent reports a cancelled run as isError too, not a silent success", async () => {
+    await withTempConfig({}, async (configPath) => {
+      const cancelled: MindRunResult = { status: "cancelled", agentId: "agent-1", runId: "r1", tools: [] };
+      const fakeLayer = {
+        configPath,
+        untrustedCustomServerIds: () => [],
+        mcpServers: () => ({}),
+        prompt: async () => cancelled,
+      } as unknown as MindCursor;
+      const server = createMindCursorMcpServer({ env: {}, configPath, createMindCursor: () => fakeLayer });
+      const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+      const client = new Client({ name: "test", version: "0" });
+      await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+      const result = await client.callTool({ name: "mind_run_agent", arguments: { prompt: "hi" } });
+      assert.equal(result.isError, true);
+      assert.equal(JSON.parse(textOf(result)).status, "cancelled");
+      await client.close();
+      await server.close();
+    });
+  });
+
   it("mind_run_agent and mind_resume_agent report a fake agent's error status as isError", async () => {
     await withTempConfig({}, async (configPath) => {
       let sendArgs: unknown;

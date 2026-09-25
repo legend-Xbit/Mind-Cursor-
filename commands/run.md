@@ -44,7 +44,7 @@ npx tsx src/cli.ts run "<prompt>" --runtime cloud --profile cloud-pr --no-stream
 npx tsx src/cli.ts resume <agentId> "<follow-up>"
 ```
 
-Exit codes: `0` finished, `1` startup (`CursorAgentError`), `2` run executed and failed.
+Exit codes: `0` finished, `1` startup (`CursorAgentError`), `2` run executed and failed, `3` run cancelled.
 
 ⚠️ Cloud `--profile cloud-pr` sets `autoCreatePR`. Require an explicit "yes" before that command.
 
@@ -55,6 +55,7 @@ Exit codes: `0` finished, `1` startup (`CursorAgentError`), `2` run executed and
 - [ ] `agentId` and `runId` were logged
 - [ ] Attached MCP ids match the preflight ready set
 - [ ] On `error`, report exit 2 and do not pretend success
+- [ ] On `cancelled`, report exit 3 — a dashboard-cancelled cloud run is not a success either
 
 ## Summary
 
