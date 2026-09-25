@@ -15,6 +15,7 @@ Launch one agent turn through the Mind Cursor layer. Spends Cursor usage. Cloud 
 4. Resolve runtime: `--runtime local|cloud`, config `runtime`, or `MIND_CURSOR_RUNTIME` (default `local`).
 5. If runtime is `cloud` and `cloud.autoCreatePR` is true (profile `cloud-pr`), **do not start** until the user explicitly says yes to opening a PR.
 6. `npx tsx src/cli.ts list --json` — note which tools will attach. **Never print token values.**
+7. A stderr line `skipped untrusted custom servers from …` means the config file was discovered (not pointed to explicitly) and its `customServers` were not attached. Do not pass `--trust-config` on the user's behalf; ask first.
 
 ## Plan
 

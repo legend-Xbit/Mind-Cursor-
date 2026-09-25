@@ -29,7 +29,7 @@
   },
   "dependencies": {
     "@cursor/sdk": "^1.0.0",
-    "@modelcontextprotocol/sdk": "^1.25.1",
+    "@modelcontextprotocol/sdk": "~1.30.0",
     "zod": "^3.25.76"
   },
   "devDependencies": {

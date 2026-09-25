@@ -38,7 +38,8 @@ The operational core. Follow these conventions:
 
 - **MCP-first, CLI-fallback** — Prefer the `mind-cursor` MCP server (`mind_list_tools`, `mind_resolve_mcp`, `mind_layer_info`, `mind_run_agent`, `mind_resume_agent`) and the other attached MCP tools (Notion, Vercel, GitHub, Slack, …). Use `npx tsx src/cli.ts …` when MCP is not connected.
 - **Structured output** — Prefer `--json` / JSON MCP payloads; parse and present a readable summary.
-- **No secrets in output** — Never echo environment variable values. Show names and metadata only (ready / needs_auth / needs_config).
+- **No secrets in output** — Never echo environment variable values. `list`, `resolve`, `mind_list_tools`, and `mind_resolve_mcp` redact by construction (header/env/`CLIENT_SECRET` values become key-name lists); never rerun with `--reveal-secrets` inside an automated command flow.
+- **Untrusted config is not an error** — A discovered `mind-cursor.config.json`'s `customServers` showing `needs_config` with an "untrusted" reason is expected, not a bug: it only attaches with `--trust-config`, `MIND_CURSOR_TRUST_CONFIG=1`, or an explicit `--config`/`MIND_CURSOR_CONFIG` path. Do not pass `--trust-config` on the caller's behalf without their say-so.
 - **Confirmation for destructive ops** — Cloud runs with `autoCreatePR`, production deploys, env removal, and anything that opens a PR require an explicit "yes" from the user.
 
 ### 4. Verification

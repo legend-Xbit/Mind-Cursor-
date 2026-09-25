@@ -38,7 +38,15 @@ npx tsx src/cli.ts resume agent-... "حدّث سجل التغييرات"
 npx tsx src/cli.ts serve
 ```
 
-`serve` يشغّل سيرفر MCP محلي (`mind_list_tools`, `mind_resolve_mcp`, `mind_run_agent`, `mind_resume_agent`). ملف `.cursor/mcp.json` يربطه بهذا المشروع مع Notion وVercel وGitHub وSlack.
+`serve` يشغّل سيرفر MCP محلي (`mind_list_tools`, `mind_resolve_mcp`, `mind_layer_info`, `mind_run_agent`, `mind_resume_agent`). ملف `.cursor/mcp.json` يربطه بهذا المشروع مع Notion وVercel وGitHub وSlack.
+
+مخرجات `list` و`resolve` (والأدوات المقابلة في MCP) **محجوبة افتراضياً**: قيم الرؤوس (headers)، `CLIENT_SECRET`، ومتغيرات env تظهر كأسماء مفاتيح فقط (`headerKeys`, `envKeys`, `authKeys`) لا كقيم. مرّر `--reveal-secrets` لـ`list`/`resolve` لطباعة القيم الخام عند الحاجة الفعلية (يطبع تحذيراً على stderr).
+
+### مصدر الإعداد والثقة
+
+- `MIND_CURSOR_CONFIG=<path>` أو `--config <path>` يحدّدان ملف الإعداد صراحةً. غيابهما يجعل الطبقة تبحث عن `./mind-cursor.config.json` في مجلد العمل تلقائياً ("discovered").
+- مسار صريح (`--config` أو `MIND_CURSOR_CONFIG`) مفقود يوقف التنفيذ برسالة خطأ واضحة بدل التراجع الصامت للقيم الافتراضية. مسار "discovered" مفقود يمر بصمت (لا إعداد = القيم الافتراضية).
+- `config.customServers` من ملف **discovered** (غير محدَّد صراحةً) **غير موثوق افتراضياً**: أوامره (stdio) وروابطه (http) لا تُرفق، لأن `mind-cursor` قد يُشغَّل داخل أي مستودع مستنسَخ فيحاول ذلك المستودع تشغيل أوامره الخاصة. مرّر `--trust-config` أو `MIND_CURSOR_TRUST_CONFIG=1` لتوثيقها، أو أشر لملف الإعداد صراحةً عبر `--config`/`MIND_CURSOR_CONFIG` (يُعتبر التحديد الصريح توثيقاً تلقائياً).
 
 ## من الكود
 
@@ -67,7 +75,7 @@ if (result.status === "error") process.exit(2);
 | `treg` | `TREG_MCP_URL` | needs_config |
 | `plain` | `PLAIN_MCP_URL` | needs_config |
 
-أضف سيرفرات خاصة تحت `customServers` في الإعداد. على السحابة تُحذف `cwd` من إعدادات stdio لأن SDK يرفضها.
+أضف سيرفرات خاصة تحت `customServers` في الإعداد (راجع "مصدر الإعداد والثقة" أعلاه لشرط التوثيق). على السحابة تُحذف `cwd` من إعدادات stdio لأن SDK يرفضها. `local.cwd` (عند تحديده) يُحسَب نسبةً لمجلد ملف الإعداد، لا مجلد العمل الحالي.
 
 ## ملاحظات SDK
 

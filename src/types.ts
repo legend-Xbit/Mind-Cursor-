@@ -90,11 +90,34 @@ export type ResolveOptions = {
   config?: MindCursorConfig;
   runtime?: RuntimeKind;
   includeUnauthenticated?: boolean;
+  /**
+   * Trust `config.customServers` enough to run its stdio commands / attach
+   * its HTTP servers. Defaults to false. A config file discovered by
+   * scanning the working directory (rather than pointed to explicitly via
+   * `MIND_CURSOR_CONFIG`, `--config`, or `configPath`) is untrusted by
+   * default: running `mind-cursor` inside an arbitrary cloned repo must not
+   * silently execute that repo's custom MCP server commands.
+   */
+  trustCustomServers?: boolean;
+  /** Path of the loaded config file, used only to build a helpful "untrusted" reason message. */
+  configPath?: string;
 };
 
-export type LayerInfo = {
-  name: string;
-  version: string;
-  model: string;
-  runtime: RuntimeKind;
+/** How a loaded config file was located — see {@link LoadedConfig}. */
+export type ConfigSource = "explicit" | "discovered" | "none";
+
+/**
+ * Result of {@link loadConfigFile}. Carries provenance alongside the parsed
+ * config: `source` says whether the path was given explicitly or merely
+ * discovered by scanning the working directory (used to gate untrusted
+ * `customServers`), and `dir` is the anchor for resolving config-relative
+ * paths such as `local.cwd`.
+ */
+export type LoadedConfig = {
+  config: MindCursorConfig;
+  /** Absolute path of the config file that was loaded, or would have been. */
+  path: string;
+  /** Directory containing `path`. */
+  dir: string;
+  source: ConfigSource;
 };

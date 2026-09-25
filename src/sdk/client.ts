@@ -1,12 +1,21 @@
+import { resolve } from "node:path";
 import { Agent, CursorAgentError, type AgentOptions } from "@cursor/sdk";
 import { applyProfile, loadConfigFile, resolveModel, resolveRuntime } from "../config.ts";
 import { inspectAll, resolveMcpServers, summarizeTools } from "../mcp/registry.ts";
+import { getPreset } from "../mcp/presets.ts";
 import type { McpServerConfig, MindCursorConfig, ResolvedTool, RuntimeKind } from "../types.ts";
 import { formatStartupError } from "./errors.ts";
 import { writeAssistantStream } from "./run.ts";
 
 export type MindCursorOptions = {
   apiKey?: string;
+  /**
+   * A config object supplied directly by the caller. Bypasses file lookup
+   * entirely and is trusted by construction (the caller authored it in
+   * code) — `customServers` on it always attaches, regardless of
+   * `trustConfig`. Note: unlike a loaded file, this is NOT run through
+   * `${VAR}` interpolation.
+   */
   config?: MindCursorConfig;
   configPath?: string;
   profile?: string;
@@ -16,6 +25,14 @@ export type MindCursorOptions = {
   env?: NodeJS.ProcessEnv;
   includeUnauthenticated?: boolean;
   stream?: boolean;
+  /**
+   * Trust `config.customServers` from a config file that was only
+   * discovered (not pointed to explicitly via `configPath` or
+   * `MIND_CURSOR_CONFIG`) enough to run its stdio commands / attach its
+   * HTTP servers. Defaults to false. Also settable via
+   * `MIND_CURSOR_TRUST_CONFIG=1`.
+   */
+  trustConfig?: boolean;
 };
 
 export type MindRunResult = {
@@ -36,6 +53,8 @@ function requireApiKey(options: MindCursorOptions, env: NodeJS.ProcessEnv): stri
 
 export class MindCursor {
   readonly config: MindCursorConfig;
+  readonly configPath: string | undefined;
+  readonly trustCustomServers: boolean;
   readonly runtime: RuntimeKind;
   readonly model: string;
   readonly apiKey: string;
@@ -45,14 +64,45 @@ export class MindCursor {
 
   constructor(options: MindCursorOptions = {}) {
     this.env = options.env ?? process.env;
-    const loaded = options.config ?? loadConfigFile(options.configPath, this.env);
-    this.config = applyProfile(loaded, options.profile);
+
+    let rawConfig: MindCursorConfig;
+    let configDir: string | undefined;
+    let trustedBySource = true;
+    if (options.config) {
+      rawConfig = options.config;
+      this.configPath = undefined;
+    } else {
+      const loaded = loadConfigFile({ path: options.configPath, env: this.env });
+      rawConfig = loaded.config;
+      configDir = loaded.dir;
+      this.configPath = loaded.path;
+      trustedBySource = loaded.source === "explicit";
+    }
+
+    this.config = applyProfile(rawConfig, options.profile);
+    this.trustCustomServers =
+      trustedBySource || options.trustConfig === true || this.env.MIND_CURSOR_TRUST_CONFIG === "1";
     this.runtime = resolveRuntime(this.config, options.runtime, this.env);
     this.model = options.model ?? resolveModel(this.config, this.env);
     this.apiKey = requireApiKey(options, this.env);
-    this.cwd = options.cwd ?? this.config.local?.cwd ?? process.cwd();
+    this.cwd = resolve(configDir ?? process.cwd(), options.cwd ?? this.config.local?.cwd ?? ".");
     this.includeUnauthenticated =
       options.includeUnauthenticated ?? this.config.includeUnauthenticated ?? false;
+
+    const skipped = this.untrustedCustomServerIds();
+    if (skipped.length > 0) {
+      process.stderr.write(
+        `skipped untrusted custom servers from ${this.configPath ?? "(no config file)"}: ${skipped.join(", ")} (pass --trust-config)\n`,
+      );
+    }
+  }
+
+  /** Custom server ids present in config that were skipped because the config file is untrusted. */
+  untrustedCustomServerIds(): string[] {
+    if (this.trustCustomServers) {
+      return [];
+    }
+    return Object.keys(this.config.customServers ?? {}).filter((id) => !getPreset(id));
   }
 
   tools(): ResolvedTool[] {
@@ -61,6 +111,8 @@ export class MindCursor {
       config: this.config,
       runtime: this.runtime,
       includeUnauthenticated: this.includeUnauthenticated,
+      trustCustomServers: this.trustCustomServers,
+      configPath: this.configPath,
     });
   }
 
@@ -70,6 +122,8 @@ export class MindCursor {
       config: this.config,
       runtime: this.runtime,
       includeUnauthenticated: this.includeUnauthenticated,
+      trustCustomServers: this.trustCustomServers,
+      configPath: this.configPath,
     });
   }
 

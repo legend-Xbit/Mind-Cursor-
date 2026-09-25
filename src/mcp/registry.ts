@@ -94,10 +94,18 @@ export function inspectPreset(preset: ToolPreset, env: NodeJS.ProcessEnv = proce
   };
 }
 
+export type CustomServerTrust = {
+  /** Whether config.customServers may actually run/attach. Defaults to untrusted. */
+  trusted: boolean;
+  /** Path of the config file, for the "untrusted" reason message only. */
+  configPath?: string;
+};
+
 export function inspectCustom(
   id: string,
   server: McpServerConfig,
   selected: boolean,
+  trust: CustomServerTrust = { trusted: false },
 ): ResolvedTool {
   if (!selected) {
     return {
@@ -107,6 +115,16 @@ export function inspectCustom(
       category: "custom",
       status: "disabled",
       reason: "Not in enabled list, or listed in disabled.",
+    };
+  }
+  if (!trust.trusted) {
+    return {
+      id,
+      title: id,
+      description: "Custom MCP server from mind-cursor.config.json",
+      category: "custom",
+      status: "needs_config",
+      reason: `untrusted customServers entry from ${trust.configPath ?? "the discovered config file"} — pass --trust-config or MIND_CURSOR_TRUST_CONFIG=1`,
     };
   }
   return {
@@ -146,11 +164,12 @@ export function inspectAll(options: ResolveOptions = {}): ResolvedTool[] {
     tools.push(inspectPreset(preset, env));
   }
 
+  const trust: CustomServerTrust = { trusted: options.trustCustomServers ?? false, configPath: options.configPath };
   for (const [id, server] of Object.entries(config.customServers ?? {})) {
     if (getPreset(id)) {
       continue;
     }
-    tools.push(inspectCustom(id, server, isSelected(id, config)));
+    tools.push(inspectCustom(id, server, isSelected(id, config), trust));
   }
 
   return tools;

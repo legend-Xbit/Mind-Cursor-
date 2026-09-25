@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { applyProfile, loadConfigFile, resolveModel, resolveRuntime } from "./config.ts";
 import { inspectAll, resolveMcpServers, summarizeTools } from "./mcp/registry.ts";
+import { redactServer, redactTool } from "./redact.ts";
 import { EXIT_OK, EXIT_RUN_FAILED, EXIT_STARTUP_FAILED, formatStartupError } from "./sdk/errors.ts";
 import type { RuntimeKind } from "./types.ts";
 import { LAYER_VERSION } from "./version.ts";
@@ -11,24 +12,34 @@ type Flags = {
   runtime?: RuntimeKind;
   profile?: string;
   model?: string;
+  configPath?: string;
   stream: boolean;
   includeUnauthenticated: boolean;
   json: boolean;
+  trustConfig: boolean;
+  revealSecrets: boolean;
 };
 
 function usage(): string {
   return `mind-cursor ${LAYER_VERSION}
 
 Usage:
-  mind-cursor list [--profile name] [--json]
-  mind-cursor resolve [--profile name] [--runtime local|cloud] [--include-unauthenticated]
-  mind-cursor run "<prompt>" [--runtime local|cloud] [--profile name] [--model id] [--no-stream]
-  mind-cursor resume <agentId> "<prompt>" [--runtime local|cloud] [--profile name]
+  mind-cursor list [--profile name] [--config path] [--json] [--reveal-secrets]
+  mind-cursor resolve [--profile name] [--config path] [--runtime local|cloud] [--include-unauthenticated] [--trust-config] [--reveal-secrets]
+  mind-cursor run "<prompt>" [--runtime local|cloud] [--profile name] [--config path] [--model id] [--no-stream] [--trust-config]
+  mind-cursor resume <agentId> "<prompt>" [--runtime local|cloud] [--profile name] [--config path] [--trust-config]
   mind-cursor serve
 
+Flags:
+  --config path              explicit mind-cursor.config.json path (also trusts its customServers)
+  --trust-config              trust customServers from a config file discovered in cwd
+  --reveal-secrets            print raw tokens/headers instead of redacted key names (list/resolve only)
+  --include-unauthenticated   attach HTTP/SSE servers that have a URL but no token
+
 Environment:
-  CURSOR_API_KEY     required for run / resume
-  MIND_CURSOR_CONFIG path to mind-cursor.config.json
+  CURSOR_API_KEY          required for run / resume
+  MIND_CURSOR_CONFIG      path to mind-cursor.config.json (same as --config)
+  MIND_CURSOR_TRUST_CONFIG=1  same as --trust-config
 `;
 }
 
@@ -39,6 +50,8 @@ function parseArgs(argv: string[]): Flags {
     stream: true,
     includeUnauthenticated: false,
     json: false,
+    trustConfig: false,
+    revealSecrets: false,
   };
 
   for (let i = 1; i < argv.length; i += 1) {
@@ -53,10 +66,16 @@ function parseArgs(argv: string[]): Flags {
       flags.profile = argv[++i];
     } else if (token === "--model") {
       flags.model = argv[++i];
+    } else if (token === "--config") {
+      flags.configPath = argv[++i];
     } else if (token === "--no-stream") {
       flags.stream = false;
     } else if (token === "--include-unauthenticated") {
       flags.includeUnauthenticated = true;
+    } else if (token === "--trust-config") {
+      flags.trustConfig = true;
+    } else if (token === "--reveal-secrets") {
+      flags.revealSecrets = true;
     } else if (token === "--json") {
       flags.json = true;
     } else if (token === "--help" || token === "-h") {
@@ -90,13 +109,17 @@ async function main(): Promise<number> {
     return EXIT_OK;
   }
 
-  const loaded = applyProfile(loadConfigFile(), flags.profile);
-  const runtime = resolveRuntime(loaded, flags.runtime);
+  const loaded = loadConfigFile({ path: flags.configPath });
+  const config = applyProfile(loaded.config, flags.profile);
+  const runtime = resolveRuntime(config, flags.runtime);
+  const trustCustomServers =
+    loaded.source === "explicit" || flags.trustConfig || process.env.MIND_CURSOR_TRUST_CONFIG === "1";
 
   if (flags.command === "list") {
-    const tools = inspectAll({ config: loaded, runtime });
+    const tools = inspectAll({ config, runtime, trustCustomServers, configPath: loaded.path });
+    const view = flags.revealSecrets ? tools : tools.map(redactTool);
     if (flags.json) {
-      print({ version: LAYER_VERSION, model: resolveModel(loaded), runtime, ...summarizeTools(tools), tools }, true);
+      print({ version: LAYER_VERSION, model: resolveModel(config), runtime, ...summarizeTools(tools), tools: view }, true);
     } else {
       for (const tool of tools) {
         const mark =
@@ -115,11 +138,19 @@ async function main(): Promise<number> {
 
   if (flags.command === "resolve") {
     const servers = resolveMcpServers({
-      config: loaded,
+      config,
       runtime,
       includeUnauthenticated: flags.includeUnauthenticated,
+      trustCustomServers,
+      configPath: loaded.path,
     });
-    print({ runtime, model: resolveModel(loaded), servers }, true);
+    const view = flags.revealSecrets
+      ? servers
+      : Object.fromEntries(Object.entries(servers).map(([id, server]) => [id, redactServer(server)]));
+    if (flags.revealSecrets) {
+      process.stderr.write("warning: printing raw tokens and headers (--reveal-secrets)\n");
+    }
+    print({ runtime, model: resolveModel(config), servers: view }, true);
     return EXIT_OK;
   }
 
@@ -137,7 +168,9 @@ async function main(): Promise<number> {
       profile: flags.profile,
       runtime: flags.runtime,
       model: flags.model,
+      configPath: flags.configPath,
       includeUnauthenticated: flags.includeUnauthenticated,
+      trustConfig: flags.trustConfig,
     });
 
     process.stderr.write(
