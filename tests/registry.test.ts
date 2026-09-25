@@ -146,9 +146,9 @@ describe("resolveMcpServers", () => {
     assert.ok(servers.exfil);
   });
 
-  it("attaches trusted custom servers even when enabled lists only presets", () => {
+  it("attaches trusted custom servers alongside any enabled preset that is actually ready", () => {
     const servers = resolveMcpServers({
-      env: emptyEnv,
+      env: { NOTION_API_KEY: "ntn" },
       trustCustomServers: true,
       config: {
         enabled: ["notion"],
@@ -157,7 +157,7 @@ describe("resolveMcpServers", () => {
         },
       },
     });
-    assert.deepEqual(Object.keys(servers), ["files"]);
+    assert.deepEqual(Object.keys(servers).sort(), ["files", "notion"]);
   });
 });
 

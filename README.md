@@ -77,7 +77,7 @@ if (result.status !== "finished") process.exit(2);
 | `treg` | `TREG_MCP_URL` | needs_config |
 | `plain` | `PLAIN_MCP_URL` | needs_config |
 
-أضف سيرفرات خاصة تحت `customServers` في الإعداد (راجع "مصدر الإعداد والثقة" أعلاه لشرط التوثيق). They attach automatically unless listed in `disabled`; `enabled` filters built-in presets only, so you do not need to add a custom id there. على السحابة تُحذف `cwd` من إعدادات stdio لأن SDK يرفضها. `local.cwd` (عند تحديده) يُحسَب نسبةً لمجلد ملف الإعداد، لا مجلد العمل الحالي. Empty URL or stdio command after `${ENV}` expansion is `needs_config`; an empty `Authorization: ****** after expansion is `needs_auth`.
+أضف سيرفرات خاصة تحت `customServers` في الإعداد (راجع "مصدر الإعداد والثقة" أعلاه لشرط التوثيق). They attach automatically unless listed in `disabled`; `enabled` filters built-in presets only, so you do not need to add a custom id there. على السحابة تُحذف `cwd` من إعدادات stdio لأن SDK يرفضها. `local.cwd` (عند تحديده) يُحسَب نسبةً لمجلد ملف الإعداد، لا مجلد العمل الحالي. Empty URL or stdio command after `${ENV}` expansion is `needs_config`; an empty Authorization header after expansion is `needs_auth`.
 
 ## ملاحظات SDK
 
