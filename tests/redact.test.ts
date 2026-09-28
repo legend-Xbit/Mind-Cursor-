@@ -20,6 +20,7 @@ const FIXTURE_OAUTH_SECRET = "oauth_fixture_client_secret_bbbb";
 const FIXTURE_NOTION_TOKEN = "ntn_fixture_secret_cccc";
 const FIXTURE_FIGMA_SECRET = "fig_fixture_client_secret_dddd";
 const FIXTURE_STDIO_ENV = "stdio_fixture_env_eeee";
+const FIXTURE_STDIO_COMMAND = "stdio_fixture_command_ffff";
 
 function assertNoLeakedSecrets(output: string): void {
   assert.equal(output.includes("Bearer "), false, "public output must not contain Bearer credentials");
@@ -29,6 +30,7 @@ function assertNoLeakedSecrets(output: string): void {
     FIXTURE_NOTION_TOKEN,
     FIXTURE_FIGMA_SECRET,
     FIXTURE_STDIO_ENV,
+    FIXTURE_STDIO_COMMAND,
   ]) {
     assert.equal(output.includes(secret), false, "public output must not contain fixture secret values");
   }
@@ -40,14 +42,14 @@ function secretConfig() {
     customServers: {
       hook: {
         type: "http",
-        url: "https://example.test/mcp",
+        url: `https://example.test/mcp/${FIXTURE_HTTP_TOKEN}?key=${FIXTURE_OAUTH_SECRET}`,
         headers: { Authorization: `Bearer ${FIXTURE_HTTP_TOKEN}` },
         auth: { CLIENT_ID: "cid_fixture", CLIENT_SECRET: FIXTURE_OAUTH_SECRET },
       },
       files: {
         type: "stdio",
-        command: "npx",
-        args: ["-y", "mcp"],
+        command: `/tmp/${FIXTURE_STDIO_COMMAND}/npx`,
+        args: ["-y", "mcp", `--token=${FIXTURE_STDIO_ENV}`],
         env: { TOKEN: FIXTURE_STDIO_ENV },
       },
     },
@@ -55,7 +57,7 @@ function secretConfig() {
 }
 
 describe("redact helpers", () => {
-  it("strips Authorization and CLIENT_SECRET from public JSON", () => {
+  it("strips credentials from all MCP connection fields in public JSON", () => {
     const tools = inspectAll({
       env: {
         NOTION_API_KEY: FIXTURE_NOTION_TOKEN,
@@ -78,9 +80,40 @@ describe("redact helpers", () => {
       null,
       2,
     );
+    assert.ok(servers.hook && "url" in servers.hook);
+    assert.match(servers.hook.url, /sk_fixture_http_token_aaaa/);
+    assert.ok(servers.files && "command" in servers.files);
+    assert.match(servers.files.command, /stdio_fixture_command_ffff/);
+    assert.match(servers.files.args?.[2] ?? "", /stdio_fixture_env_eeee/);
     assertNoLeakedSecrets(publicJson);
     assert.match(publicJson, /"hasHeaders": true/);
     assert.match(publicJson, /"hasAuth": true/);
+  });
+
+  it("redacts secrets expanded from environment variables in URLs and stdio commands", () => {
+    const config = {
+      customServers: {
+        hook: { type: "http" as const, url: "https://example.test/mcp/${MCP_URL_SECRET}" },
+        files: {
+          type: "stdio" as const,
+          command: "${MCP_COMMAND_SECRET}",
+          args: ["--token=${MCP_ARG_SECRET}"],
+        },
+      },
+    };
+    const env = {
+      MCP_URL_SECRET: FIXTURE_HTTP_TOKEN,
+      MCP_COMMAND_SECRET: FIXTURE_STDIO_COMMAND,
+      MCP_ARG_SECRET: FIXTURE_STDIO_ENV,
+    };
+    const tools = inspectAll({ config, env });
+    const servers = resolveMcpServers({ config, env });
+    assert.ok(servers.hook && "url" in servers.hook);
+    assert.equal(servers.hook.url, `https://example.test/mcp/${FIXTURE_HTTP_TOKEN}`);
+    assert.ok(servers.files && "command" in servers.files);
+    assert.equal(servers.files.command, FIXTURE_STDIO_COMMAND);
+    assert.equal(servers.files.args?.[0], `--token=${FIXTURE_STDIO_ENV}`);
+    assertNoLeakedSecrets(JSON.stringify({ tools: toPublicTools(tools), servers: redactMcpServers(servers) }));
   });
 });
 

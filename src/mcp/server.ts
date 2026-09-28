@@ -80,7 +80,7 @@ export function createMindCursorMcpServer(): McpServer {
     {
       title: "Resolve MCP servers for a Cursor SDK agent",
       description:
-        "Build the mcpServers object to pass to Agent.create / Agent.prompt / Agent.resume. Secrets stay in env; this returns redacted URLs and header keys.",
+        "Inspect servers attached to a Cursor SDK agent. Connection URLs, commands, arguments and credentials are redacted; use the SDK helper for actual connection options.",
       inputSchema: {
         profile: z.string().optional(),
         includeUnauthenticated: z

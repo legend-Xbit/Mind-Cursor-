@@ -39,7 +39,7 @@ npx tsx src/cli.ts resume agent-... "حدّث سجل التغييرات"
 npx tsx src/cli.ts serve
 ```
 
-`list --json` and `resolve` print a redacted catalog (`hasHeaders` / `hasAuth`, never `Authorization` or `CLIENT_SECRET` values). `serve` يشغّل سيرفر MCP محلي (`mind_list_tools`, `mind_resolve_mcp`, `mind_run_agent`, `mind_resume_agent`). `mind_list_tools` uses the same redaction. ملف `.cursor/mcp.json` يربطه بهذا المشروع مع Notion وVercel وGitHub وSlack.
+`list --json` and `resolve` print a redacted catalog: connection URLs, stdio commands and arguments are `[redacted]` because any of them may contain credentials expanded from `${ENV}`. Headers, OAuth credentials and stdio environment values are also hidden. Use `layer.mcpServers()` in code to obtain the actual connection options. `serve` يشغّل سيرفر MCP محلي (`mind_list_tools`, `mind_resolve_mcp`, `mind_run_agent`, `mind_resume_agent`). `mind_list_tools` and `mind_resolve_mcp` use the same redaction. ملف `.cursor/mcp.json` يربطه بهذا المشروع مع Notion وVercel وGitHub وSlack.
 
 ## من الكود
 
