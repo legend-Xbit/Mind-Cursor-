@@ -65,8 +65,9 @@ describe("MCP tools never emit secret values", () => {
       const listTools = await client.callTool({ name: "mind_list_tools", arguments: {} });
       assertNoSecrets(JSON.stringify(listTools));
       const listText = (listTools.content as Array<{ text: string }>)[0]!.text;
-      assert.ok(listText.includes("\"headerKeys\""), "expected header key names, not header values");
+      assert.ok(listText.includes("\"hasHeaders\": true"), "expected header presence, not header values");
       assert.ok(!listText.includes("\"headers\""), "raw headers field must not be present");
+      assert.ok(listText.includes("[redacted]"));
 
       const resolveMcp = await client.callTool({ name: "mind_resolve_mcp", arguments: {} });
       assertNoSecrets(JSON.stringify(resolveMcp));
@@ -74,7 +75,10 @@ describe("MCP tools never emit secret values", () => {
       // internal is trusted here (configPath was passed explicitly), so it must
       // actually be attached — with its secrets reduced to key names.
       assert.ok(resolveText.includes("\"internal\""));
-      assert.ok(resolveText.includes("\"envKeys\""));
+      assert.ok(resolveText.includes("\"hasEnv\": true"));
+      assert.ok(resolveText.includes("[redacted]"));
+      assert.equal(resolveText.includes("--token"), false);
+      assert.equal(resolveText.includes("tok_x"), false);
 
       await client.close();
       await server.close();
@@ -96,7 +100,15 @@ describe("CLI output is redacted by default", () => {
     const result = runCli(["list", "--json"]);
     assert.equal(result.status, 0, result.stderr);
     assertNoSecrets(result.stdout);
-    assert.ok(result.stdout.includes("headerKeys"));
+    assert.ok(result.stdout.includes("hasHeaders"));
+    assert.ok(result.stdout.includes("[redacted]"));
+  });
+
+  it("list --json --reveal-secrets warns on stderr", () => {
+    const revealed = runCli(["list", "--json", "--reveal-secrets"]);
+    assert.equal(revealed.status, 0, revealed.stderr);
+    assert.match(revealed.stderr, /warning: printing raw tokens and headers \(--reveal-secrets\)/);
+    assert.ok(revealed.stdout.includes("ntn_test"));
   });
 
   it("resolve never prints the raw token, and --reveal-secrets does (with a warning)", () => {

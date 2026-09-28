@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, it, mock } from "node:test";
 import { Agent, type AgentOptions } from "@cursor/sdk";
 import { createMindCursor } from "../src/sdk/client.ts";
@@ -72,7 +75,10 @@ describe("MindCursor.send contracts", () => {
     assert.ok(lastCreate.mcpServers.figma);
     assert.equal("headers" in lastCreate.mcpServers.notion, true);
     assertNoLeakedSecrets(JSON.stringify(result));
-    assert.ok(result.tools.some((tool) => tool.id === "notion" && tool.status === "ready"));
+    const notion = result.tools.find((tool) => tool.id === "notion" && tool.status === "ready");
+    assert.ok(notion);
+    assert.equal(notion.server && "url" in notion.server && notion.server.url, "[redacted]");
+    assert.equal(notion.server && "hasHeaders" in notion.server && notion.server.hasHeaders, true);
   });
 
   it("passes mcpServers to Agent.resume", async () => {
@@ -156,5 +162,72 @@ describe("MindCursor.send contracts", () => {
     const inspect = createMindCursor({ config: {}, env: {}, runtime: "local" });
     await assert.rejects(() => inspect.send("hi", { stream: false }), /CURSOR_API_KEY is required/);
     assert.equal(createMock.mock.callCount(), 0);
+  });
+});
+
+describe("MindCursor cwd and untrusted custom servers", () => {
+  it("resolves an explicit relative cwd against the caller, and local.cwd against the config file", async () => {
+    const root = await mkdtemp(join(tmpdir(), "mind-cursor-cwd-"));
+    const configDir = join(root, "configs");
+    const caller = join(root, "caller");
+    await mkdir(configDir, { recursive: true });
+    await mkdir(caller, { recursive: true });
+    const configPath = join(configDir, "mind-cursor.config.json");
+    await writeFile(configPath, JSON.stringify({ local: { cwd: "from-config" } }));
+    const previous = process.cwd();
+    process.chdir(caller);
+    try {
+      const explicit = createMindCursor({ configPath, cwd: "relative-work", env: {} });
+      assert.equal(explicit.cwd, resolve(caller, "relative-work"));
+      const fromFile = createMindCursor({ configPath, env: {} });
+      assert.equal(fromFile.cwd, resolve(configDir, "from-config"));
+      const absolute = createMindCursor({ configPath, cwd: caller, env: {} });
+      assert.equal(absolute.cwd, caller);
+    } finally {
+      process.chdir(previous);
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("does not count a disabled custom server as untrusted", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "mind-cursor-untrusted-"));
+    await writeFile(
+      join(dir, "mind-cursor.config.json"),
+      JSON.stringify({
+        disabled: ["exfil"],
+        customServers: {
+          exfil: { type: "stdio", command: "sh", args: ["-c", "echo hi"] },
+          live: { type: "stdio", command: "npx", args: ["-y", "mcp"] },
+        },
+      }),
+    );
+    const previous = process.cwd();
+    const previousConfig = process.env.MIND_CURSOR_CONFIG;
+    delete process.env.MIND_CURSOR_CONFIG;
+    process.chdir(dir);
+    try {
+      const layer = createMindCursor({ env: {}, trustConfig: false });
+      assert.deepEqual(layer.untrustedCustomServerIds(), ["live"]);
+
+      await writeFile(
+        join(dir, "mind-cursor.config.json"),
+        JSON.stringify({
+          disabled: ["exfil"],
+          customServers: {
+            exfil: { type: "stdio", command: "sh", args: ["-c", "echo hi"] },
+          },
+        }),
+      );
+      const onlyDisabled = createMindCursor({ env: {}, trustConfig: false });
+      assert.deepEqual(onlyDisabled.untrustedCustomServerIds(), []);
+    } finally {
+      process.chdir(previous);
+      if (previousConfig === undefined) {
+        delete process.env.MIND_CURSOR_CONFIG;
+      } else {
+        process.env.MIND_CURSOR_CONFIG = previousConfig;
+      }
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 });

@@ -35,7 +35,7 @@ npx tsx src/cli.ts list --json
 npx tsx src/cli.ts resolve
 ```
 
-`resolve` returns the `mcpServers` object that would be passed to `Agent.create`, **redacted by default**: header/env/`CLIENT_SECRET` values become key-name lists (`headerKeys`, `envKeys`, `authKeys`), not values. `--reveal-secrets` prints the raw values (with a stderr warning) — only use it when the caller genuinely needs the value, never in an automated flow. `mind_list_tools` / `mind_resolve_mcp` over MCP are always redacted with no reveal escape hatch.
+`resolve` returns the `mcpServers` object that would be passed to `Agent.create`, **redacted by default**: URLs, stdio commands, and arguments are `[redacted]` (inline `--token=` / `--api_key=` forms and punctuated path segments included). Header, env, and `CLIENT_SECRET` values are omitted (`hasHeaders`, `hasEnv`, `hasAuth`). `--reveal-secrets` prints the raw values and writes a stderr warning for both `list` and `resolve` — only use it when the caller genuinely needs the value, never in an automated flow. `mind_list_tools` / `mind_resolve_mcp` over MCP use the same redaction and have no reveal escape hatch.
 
 ## Verification
 

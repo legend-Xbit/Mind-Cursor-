@@ -20,20 +20,24 @@ export type PublicResolvedTool = Omit<ResolvedTool, "server"> & {
   server?: RedactedMcpServer;
 };
 
-/** Strip header/auth/env values so inspect output cannot leak secrets. */
+// Connection fields can contain expanded ${ENV} credentials in any position,
+// including URL paths, stdio commands and arguments. Do not expose raw values.
+const REDACTED = "[redacted]";
+
+/** Strip connection values so inspect output cannot leak configured credentials. */
 export function redactMcpServer(server: McpServerConfig): RedactedMcpServer {
   if ("url" in server) {
     return {
       type: server.type ?? "http",
-      url: server.url,
+      url: REDACTED,
       hasHeaders: Boolean(server.headers && Object.keys(server.headers).length > 0),
       hasAuth: Boolean(server.auth),
     };
   }
   return {
     type: "stdio",
-    command: server.command,
-    args: server.args,
+    command: REDACTED,
+    args: server.args?.map(() => REDACTED),
     hasEnv: Boolean(server.env && Object.keys(server.env).length > 0),
   };
 }

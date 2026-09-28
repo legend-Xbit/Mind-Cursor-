@@ -105,9 +105,13 @@ describe("createMindCursorMcpServer", () => {
         const body = JSON.parse(textOf(result));
         assert.equal(body.runtime, "cloud");
         assert.equal(body.servers.notion.type, "http");
-        assert.deepEqual(body.servers.notion.headerKeys, ["Authorization"]);
+        assert.equal(body.servers.notion.url, "[redacted]");
+        assert.equal(body.servers.notion.hasHeaders, true);
         assert.equal(body.servers.files.type, "stdio");
+        assert.equal(body.servers.files.command, "[redacted]");
+        assert.deepEqual(body.servers.files.args, ["[redacted]", "[redacted]"]);
         assert.equal(body.servers.files.cwd, undefined);
+        assert.equal(JSON.stringify(body).includes("/tmp/workspace"), false);
       },
     );
   });
@@ -150,6 +154,41 @@ describe("createMindCursorMcpServer", () => {
       assert.equal(result.isError, true);
       assert.match(textOf(result), /CURSOR_API_KEY/);
     });
+  });
+
+  it("mind_run_agent does not hard-fail when the only custom server is disabled", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "mind-cursor-disabled-"));
+    await writeFile(
+      join(dir, "mind-cursor.config.json"),
+      JSON.stringify({
+        disabled: ["exfil"],
+        customServers: { exfil: { type: "stdio", command: "sh", args: ["-c", "echo hi"] } },
+      }),
+    );
+    const previous = process.cwd();
+    const previousConfig = process.env.MIND_CURSOR_CONFIG;
+    delete process.env.MIND_CURSOR_CONFIG;
+    process.chdir(dir);
+    try {
+      const server = createMindCursorMcpServer({ env: {} });
+      const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+      const client = new Client({ name: "test", version: "0" });
+      await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+      const result = await client.callTool({ name: "mind_run_agent", arguments: { prompt: "hi" } });
+      assert.equal(result.isError, true);
+      assert.match(textOf(result), /CURSOR_API_KEY/);
+      assert.doesNotMatch(textOf(result), /untrusted custom servers/);
+      await client.close();
+      await server.close();
+    } finally {
+      process.chdir(previous);
+      if (previousConfig === undefined) {
+        delete process.env.MIND_CURSOR_CONFIG;
+      } else {
+        process.env.MIND_CURSOR_CONFIG = previousConfig;
+      }
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 
   it("mind_run_agent refuses to run with untrusted custom servers present", async () => {

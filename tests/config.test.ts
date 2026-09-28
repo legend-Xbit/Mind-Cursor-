@@ -120,7 +120,7 @@ describe("loadConfigFile", () => {
       const missing = join(dir, "nope.json");
       assert.throws(
         () => loadConfigFile({ path: missing }),
-        new RegExp(`config file not found: ${missing.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`),
+        /mind-cursor config not found/,
       );
     });
   });
@@ -129,7 +129,7 @@ describe("loadConfigFile", () => {
     await withTempDir(async (dir) => {
       const path = join(dir, "mind-cursor.config.json");
       await writeFile(path, "{ not json");
-      assert.throws(() => loadConfigFile({ path }), (error: Error) => error.message.startsWith(`${resolvePath(path)}:`));
+      assert.throws(() => loadConfigFile({ path }), /Invalid JSON in mind-cursor config/);
     });
   });
 
@@ -161,5 +161,35 @@ describe("loadConfigFile", () => {
         }
       }
     });
+  });
+
+  it("still returns MindCursorConfig from the historical (path, env) signature", async () => {
+    await withTempDir(async (dir) => {
+      const path = join(dir, "mind-cursor.config.json");
+      await writeFile(path, JSON.stringify({ model: "${MODEL_ID}", runtime: "local" }));
+      const loaded = loadConfigFile(path, { MODEL_ID: "composer-2.5" });
+      assert.equal(loaded.model, "composer-2.5");
+      assert.equal(loaded.runtime, "local");
+      assert.equal("source" in loaded, false);
+    });
+  });
+
+  it("returns an empty object when the historical call finds no default file", async () => {
+    await withTempDir(async (dir) => {
+      const previous = process.cwd();
+      process.chdir(dir);
+      try {
+        assert.deepEqual(loadConfigFile(undefined, {}), {});
+      } finally {
+        process.chdir(previous);
+      }
+    });
+  });
+
+  it("throws the historical error when a path argument does not exist", () => {
+    assert.throws(
+      () => loadConfigFile(join(tmpdir(), "mind-cursor-missing-config.json")),
+      /mind-cursor config not found/,
+    );
   });
 });

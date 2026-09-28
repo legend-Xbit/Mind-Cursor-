@@ -9,9 +9,9 @@ import { promisify } from "node:util";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { createMindCursorMcpServer } from "../src/mcp/server.ts";
+import { redactMcpServer, redactMcpServers, toPublicTools } from "../src/mcp/redact.ts";
 import { inspectAll, resolveMcpServers } from "../src/mcp/registry.ts";
-import { redactServer, redactTool, scrubUrl } from "../src/redact.ts";
-import type { HttpMcpServerConfig, MindCursorConfig, ResolvedTool, StdioMcpServerConfig } from "../src/types.ts";
+import type { MindCursorConfig } from "../src/types.ts";
 
 const execFileAsync = promisify(execFile);
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -21,17 +21,26 @@ const FIXTURE_OAUTH_SECRET = "oauth_fixture_client_secret_bbbb";
 const FIXTURE_NOTION_TOKEN = "ntn_fixture_secret_cccc";
 const FIXTURE_FIGMA_SECRET = "fig_fixture_client_secret_dddd";
 const FIXTURE_STDIO_ENV = "stdio_fixture_env_eeee";
+const FIXTURE_STDIO_COMMAND = "stdio_fixture_command_ffff";
+const FIXTURE_INLINE_TOKEN = "tok_inline_secret_gggg";
+const FIXTURE_API_KEY = "api_key_secret_hhhh";
+const FIXTURE_PUNCT_PATH = "token=sk_live_punct_iiii";
 
 function assertNoLeakedSecrets(output: string): void {
-  assert.equal(output.includes("Bearer "), false, "public output must not contain raw bearer values");
+  assert.equal(output.includes("Bearer "), false, "public output must not contain Bearer credentials");
   for (const secret of [
     FIXTURE_HTTP_TOKEN,
     FIXTURE_OAUTH_SECRET,
     FIXTURE_NOTION_TOKEN,
     FIXTURE_FIGMA_SECRET,
     FIXTURE_STDIO_ENV,
+    FIXTURE_STDIO_COMMAND,
+    FIXTURE_INLINE_TOKEN,
+    FIXTURE_API_KEY,
+    FIXTURE_PUNCT_PATH,
+    "sk_live_punct_iiii",
   ]) {
-    assert.equal(output.includes(secret), false, "public output must not contain fixture secret values");
+    assert.equal(output.includes(secret), false, `public output must not contain fixture secret ${secret}`);
   }
 }
 
@@ -41,135 +50,118 @@ function secretConfig(): MindCursorConfig {
     customServers: {
       hook: {
         type: "http",
-        url: "https://example.test/mcp",
-        headers: { Authorization: "Bearer " + FIXTURE_HTTP_TOKEN },
+        url: `https://user:${FIXTURE_OAUTH_SECRET}@example.test/api/${FIXTURE_PUNCT_PATH}?key=${FIXTURE_HTTP_TOKEN}`,
+        headers: { Authorization: `Bearer ${FIXTURE_HTTP_TOKEN}` },
         auth: { CLIENT_ID: "cid_fixture", CLIENT_SECRET: FIXTURE_OAUTH_SECRET },
       },
       files: {
         type: "stdio",
-        command: "npx",
-        args: ["-y", "mcp", "--token", FIXTURE_HTTP_TOKEN],
+        command: `/tmp/${FIXTURE_STDIO_COMMAND}/npx`,
+        args: [
+          "-y",
+          "mcp",
+          `--token=${FIXTURE_INLINE_TOKEN}`,
+          `--api_key=${FIXTURE_API_KEY}`,
+          "--api-key",
+          FIXTURE_API_KEY,
+          "--api_key",
+          FIXTURE_STDIO_ENV,
+        ],
         env: { TOKEN: FIXTURE_STDIO_ENV },
       },
     },
   };
 }
 
-describe("scrubUrl", () => {
-  it("leaves a plain URL with no query or userinfo untouched", () => {
-    assert.equal(scrubUrl("https://mcp.notion.com/mcp"), "https://mcp.notion.com/mcp");
-  });
+const SECRET_ENV = {
+  NOTION_API_KEY: FIXTURE_NOTION_TOKEN,
+  FIGMA_CLIENT_ID: "fig_id",
+  FIGMA_CLIENT_SECRET: FIXTURE_FIGMA_SECRET,
+};
 
-  it("strips userinfo and blanks a non-empty query string", () => {
-    assert.equal(
-      scrubUrl("https://" + "alice" + ":" + "pw" + "@example.com/mcp?token=abc123"),
-      "https://example.com/mcp?%3Credacted%3E",
-    );
-  });
-
-  it("redacts an opaque secret-shaped path segment while keeping route names", () => {
-    const scrubbed = scrubUrl("https://treg.example.com/s/sk_live_abc123xyz/mcp");
-    assert.equal(scrubbed, "https://treg.example.com/s/%3Credacted%3E/mcp");
-  });
-
-  it("returns non-URL strings unchanged instead of throwing", () => {
-    assert.equal(scrubUrl("not a url"), "not a url");
-  });
-});
-
-describe("redactServer", () => {
-  it("reduces http headers and CLIENT_SECRET to key names only", () => {
-    const server: HttpMcpServerConfig = {
+describe("redact helpers", () => {
+  it("redacts inline secret flags and punctuated URL path segments entirely", () => {
+    const http = redactMcpServer({
       type: "http",
-      url: "https://mcp.notion.com/mcp",
-      headers: { Authorization: "Bearer " + FIXTURE_HTTP_TOKEN },
-      auth: { CLIENT_ID: "fig_id", CLIENT_SECRET: FIXTURE_OAUTH_SECRET, scopes: ["file_content:read"] },
-    };
-    const redacted = redactServer(server);
-    assert.deepEqual(redacted, {
-      type: "http",
-      url: "https://mcp.notion.com/mcp",
-      headerKeys: ["Authorization"],
-      authKeys: ["CLIENT_ID", "CLIENT_SECRET", "scopes"],
-      scopes: ["file_content:read"],
+      url: `https://example.test/api/${FIXTURE_PUNCT_PATH}`,
+      headers: { Authorization: `Bearer ${FIXTURE_HTTP_TOKEN}` },
     });
-    assertNoLeakedSecrets(JSON.stringify(redacted));
-  });
+    if (!("url" in http)) {
+      throw new Error("expected an http redaction");
+    }
+    assert.equal(http.url, "[redacted]");
+    assert.equal(http.hasHeaders, true);
 
-  it("reduces stdio env to key names and scrubs flag-adjacent and env-equal args", () => {
-    const server: StdioMcpServerConfig = {
+    const stdio = redactMcpServer({
       type: "stdio",
-      command: "npx",
-      args: ["-y", "server", "--token", FIXTURE_HTTP_TOKEN, "--path", FIXTURE_STDIO_ENV],
-      env: { LEAKED: FIXTURE_STDIO_ENV },
-      cwd: "/repo",
-    };
-    const redacted = redactServer(server);
-    assert.deepEqual(redacted, {
-      type: "stdio",
-      command: "npx",
-      args: ["-y", "server", "--token", "<redacted>", "--path", "<redacted>"],
-      envKeys: ["LEAKED"],
-      cwd: "/repo",
+      command: `/tmp/${FIXTURE_STDIO_COMMAND}/npx`,
+      args: [`--token=${FIXTURE_INLINE_TOKEN}`, `--api_key=${FIXTURE_API_KEY}`, "--api-key", FIXTURE_API_KEY],
+      env: { TOKEN: FIXTURE_STDIO_ENV },
     });
-    assertNoLeakedSecrets(JSON.stringify(redacted));
-  });
-});
-
-describe("redactTool", () => {
-  it("redacts the nested server and leaves everything else untouched", () => {
-    const tool: ResolvedTool = {
-      id: "notion",
-      title: "Notion",
-      description: "d",
-      category: "knowledge",
-      status: "ready",
-      server: { type: "http", url: "https://mcp.notion.com/mcp", headers: { Authorization: "Bearer " + FIXTURE_HTTP_TOKEN } },
-    };
-    const redacted = redactTool(tool);
-    assert.equal(redacted.id, "notion");
-    assert.equal(redacted.status, "ready");
-    assertNoLeakedSecrets(JSON.stringify(redacted));
+    if (!("command" in stdio)) {
+      throw new Error("expected a stdio redaction");
+    }
+    assert.equal(stdio.command, "[redacted]");
+    assert.deepEqual(stdio.args, ["[redacted]", "[redacted]", "[redacted]", "[redacted]"]);
+    assert.equal(stdio.hasEnv, true);
+    assertNoLeakedSecrets(JSON.stringify({ http, stdio }));
   });
 
-  it("passes a tool with no server through untouched", () => {
-    const tool: ResolvedTool = { id: "treg", title: "Treg", description: "d", category: "data", status: "needs_config" };
-    assert.deepEqual(redactTool(tool), tool);
-  });
-});
-
-describe("redaction helpers", () => {
-  it("strip raw secret values from public JSON", () => {
+  it("strips credentials from all MCP connection fields in public JSON", () => {
     const tools = inspectAll({
-      env: {
-        NOTION_API_KEY: FIXTURE_NOTION_TOKEN,
-        FIGMA_CLIENT_ID: "fig_id",
-        FIGMA_CLIENT_SECRET: FIXTURE_FIGMA_SECRET,
-      },
+      env: SECRET_ENV,
       config: secretConfig(),
       trustCustomServers: true,
     });
     const servers = resolveMcpServers({
-      env: {
-        NOTION_API_KEY: FIXTURE_NOTION_TOKEN,
-        FIGMA_CLIENT_ID: "fig_id",
-        FIGMA_CLIENT_SECRET: FIXTURE_FIGMA_SECRET,
-      },
+      env: SECRET_ENV,
       config: secretConfig(),
       trustCustomServers: true,
     });
 
-    const publicJson = JSON.stringify(
-      {
-        tools: tools.map(redactTool),
-        servers: Object.fromEntries(Object.entries(servers).map(([id, server]) => [id, redactServer(server)])),
-      },
-      null,
-      2,
-    );
+    const publicTools = toPublicTools(tools);
+    const publicServers = redactMcpServers(servers);
+    const publicJson = JSON.stringify({ tools: publicTools, servers: publicServers }, null, 2);
+    assert.ok(servers.hook && "url" in servers.hook);
+    assert.match(servers.hook.url, /sk_fixture_http_token_aaaa/);
+    assert.match(servers.hook.url, /token=sk_live_punct_iiii/);
+    assert.ok(servers.files && "command" in servers.files);
+    assert.match(servers.files.command, /stdio_fixture_command_ffff/);
+    assert.match(servers.files.args?.join(" ") ?? "", /--token=tok_inline_secret_gggg/);
+    assert.match(servers.files.args?.join(" ") ?? "", /--api_key=api_key_secret_hhhh/);
+    assert.equal(publicServers.hook && "url" in publicServers.hook && publicServers.hook.url, "[redacted]");
+    assert.equal(publicServers.files && "command" in publicServers.files && publicServers.files.command, "[redacted]");
+    assert.ok(publicServers.files && "args" in publicServers.files && publicServers.files.args?.every((arg) => arg === "[redacted]"));
     assertNoLeakedSecrets(publicJson);
-    assert.match(publicJson, /"headerKeys": \[/);
-    assert.match(publicJson, /"envKeys": \[/);
+    assert.match(publicJson, /"hasHeaders": true/);
+    assert.match(publicJson, /"hasAuth": true/);
+    assert.match(publicJson, /"hasEnv": true/);
+  });
+
+  it("redacts secrets expanded from environment variables in URLs and stdio commands", () => {
+    const config = {
+      customServers: {
+        hook: { type: "http" as const, url: "https://example.test/mcp/${MCP_URL_SECRET}" },
+        files: {
+          type: "stdio" as const,
+          command: "${MCP_COMMAND_SECRET}",
+          args: ["--token=${MCP_ARG_SECRET}", "--api_key=${MCP_ARG_SECRET}"],
+        },
+      },
+    };
+    const env = {
+      MCP_URL_SECRET: FIXTURE_HTTP_TOKEN,
+      MCP_COMMAND_SECRET: FIXTURE_STDIO_COMMAND,
+      MCP_ARG_SECRET: FIXTURE_STDIO_ENV,
+    };
+    const tools = inspectAll({ config, env, trustCustomServers: true });
+    const servers = resolveMcpServers({ config, env, trustCustomServers: true });
+    assert.ok(servers.hook && "url" in servers.hook);
+    assert.equal(servers.hook.url, `https://example.test/mcp/${FIXTURE_HTTP_TOKEN}`);
+    assert.ok(servers.files && "command" in servers.files);
+    assert.equal(servers.files.command, FIXTURE_STDIO_COMMAND);
+    assert.equal(servers.files.args?.[0], `--token=${FIXTURE_STDIO_ENV}`);
+    assertNoLeakedSecrets(JSON.stringify({ tools: toPublicTools(tools), servers: redactMcpServers(servers) }));
   });
 });
 
@@ -181,35 +173,76 @@ describe("CLI list --json and resolve", () => {
     return path;
   }
 
-  async function runCli(args: string[], configPath: string): Promise<string> {
-    const { stdout } = await execFileAsync(process.execPath, ["--import", "tsx", join(ROOT, "src/cli.ts"), ...args], {
-      cwd: ROOT,
-      encoding: "utf8",
-      env: {
-        ...process.env,
-        MIND_CURSOR_CONFIG: configPath,
-        NOTION_API_KEY: FIXTURE_NOTION_TOKEN,
-        FIGMA_CLIENT_ID: "fig_id",
-        FIGMA_CLIENT_SECRET: FIXTURE_FIGMA_SECRET,
+  async function runCli(
+    args: string[],
+    configPath: string,
+  ): Promise<{ stdout: string; stderr: string }> {
+    const { stdout, stderr } = await execFileAsync(
+      process.execPath,
+      ["--import", "tsx", join(ROOT, "src/cli.ts"), ...args],
+      {
+        cwd: ROOT,
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          MIND_CURSOR_CONFIG: configPath,
+          ...SECRET_ENV,
+        },
       },
-    });
-    return stdout;
+    );
+    return { stdout, stderr };
   }
 
-  it("does not print raw secrets from list --json", async () => {
+  it("does not print Bearer or OAuth secrets from list --json", async () => {
     const configPath = await withSecretConfigFile();
-    const stdout = await runCli(["list", "--json"], configPath);
+    const { stdout } = await runCli(["list", "--json"], configPath);
+    const servers = resolveMcpServers({
+      env: { ...process.env, ...SECRET_ENV },
+      config: secretConfig(),
+      trustCustomServers: true,
+    });
+    const expected = toPublicTools(
+      inspectAll({
+        env: { ...process.env, ...SECRET_ENV },
+        config: secretConfig(),
+        trustCustomServers: true,
+      }),
+    );
+    const parsed = JSON.parse(stdout) as { tools: unknown };
+    assert.deepEqual(parsed.tools, JSON.parse(JSON.stringify(expected)));
+    assert.equal(JSON.stringify(redactMcpServers(servers)).includes(FIXTURE_INLINE_TOKEN), false);
     assertNoLeakedSecrets(stdout);
     assert.match(stdout, /"hook"/);
-    assert.match(stdout, /"headerKeys": \[/);
+    assert.match(stdout, /\[redacted\]/);
   });
 
-  it("does not print raw secrets from resolve", async () => {
+  it("does not print Bearer or OAuth secrets from resolve, matching redactMcpServers", async () => {
     const configPath = await withSecretConfigFile();
-    const stdout = await runCli(["resolve"], configPath);
+    const { stdout } = await runCli(["resolve"], configPath);
+    const expected = redactMcpServers(
+      resolveMcpServers({
+        env: { ...process.env, ...SECRET_ENV },
+        config: secretConfig(),
+        trustCustomServers: true,
+      }),
+    );
+    const parsed = JSON.parse(stdout) as { servers: unknown };
+    assert.deepEqual(parsed.servers, JSON.parse(JSON.stringify(expected)));
     assertNoLeakedSecrets(stdout);
-    assert.match(stdout, /"headerKeys": \[/);
-    assert.match(stdout, /"envKeys": \[/);
+    assert.match(stdout, /"hasHeaders": true/);
+    assert.match(stdout, /"hasEnv": true/);
+  });
+
+  it("list --json --reveal-secrets warns on stderr before printing raw values", async () => {
+    const configPath = await withSecretConfigFile();
+    const revealed = await runCli(["list", "--json", "--reveal-secrets"], configPath);
+    assert.match(revealed.stderr, /warning: printing raw tokens and headers \(--reveal-secrets\)/);
+    assert.match(revealed.stdout, new RegExp(FIXTURE_INLINE_TOKEN));
+    assert.match(revealed.stdout, new RegExp(FIXTURE_PUNCT_PATH));
+
+    const resolved = await runCli(["resolve", "--reveal-secrets"], configPath);
+    assert.match(resolved.stderr, /warning: printing raw tokens and headers \(--reveal-secrets\)/);
+    assert.match(resolved.stdout, new RegExp(FIXTURE_API_KEY));
   });
 });
 
@@ -223,9 +256,7 @@ describe("mind_list_tools", () => {
       env: {
         ...process.env,
         MIND_CURSOR_CONFIG: configPath,
-        NOTION_API_KEY: FIXTURE_NOTION_TOKEN,
-        FIGMA_CLIENT_ID: "fig_id",
-        FIGMA_CLIENT_SECRET: FIXTURE_FIGMA_SECRET,
+        ...SECRET_ENV,
       },
       configPath,
     });
@@ -237,9 +268,18 @@ describe("mind_list_tools", () => {
       const text = (result.content as Array<{ type: string; text?: string }>)
         .map((block) => (block.type === "text" ? (block.text ?? "") : ""))
         .join("");
+      const expected = toPublicTools(
+        inspectAll({
+          env: { ...process.env, ...SECRET_ENV },
+          config: secretConfig(),
+          trustCustomServers: true,
+          configPath,
+        }),
+      );
+      assert.deepEqual(JSON.parse(text), JSON.parse(JSON.stringify(expected)));
       assertNoLeakedSecrets(text);
       assert.match(text, /"hook"/);
-      assert.match(text, /"headerKeys": \[/);
+      assert.match(text, /\[redacted\]/);
     } finally {
       await client.close();
       await server.close();

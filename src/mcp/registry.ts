@@ -122,19 +122,46 @@ export function inspectPreset(preset: ToolPreset, env: NodeJS.ProcessEnv = proce
 }
 
 export type CustomServerTrust = {
-  /** Whether config.customServers may actually run/attach. Defaults to untrusted. */
+  /** Whether config.customServers may actually run/attach. */
   trusted: boolean;
   /** Path of the config file, for the "untrusted" reason message only. */
   configPath?: string;
 };
 
+function isCustomServerTrust(value: NodeJS.ProcessEnv | CustomServerTrust): value is CustomServerTrust {
+  return typeof (value as CustomServerTrust).trusted === "boolean";
+}
+
+/**
+ * Inspect one custom server.
+ *
+ * `inspectCustom(id, server, selected, env?)` keeps the historical argument
+ * order and attaches a selected server (trust was not a parameter then).
+ * `inspectCustom(id, server, selected, { trusted, configPath? }, env?)`
+ * applies the trust gate.
+ */
 export function inspectCustom(
   id: string,
   server: McpServerConfig,
   selected: boolean,
-  trust: CustomServerTrust = { trusted: false },
-  env: NodeJS.ProcessEnv = process.env,
+  env?: NodeJS.ProcessEnv,
+): ResolvedTool;
+export function inspectCustom(
+  id: string,
+  server: McpServerConfig,
+  selected: boolean,
+  trust: CustomServerTrust,
+  env?: NodeJS.ProcessEnv,
+): ResolvedTool;
+export function inspectCustom(
+  id: string,
+  server: McpServerConfig,
+  selected: boolean,
+  envOrTrust: NodeJS.ProcessEnv | CustomServerTrust = process.env,
+  maybeEnv?: NodeJS.ProcessEnv,
 ): ResolvedTool {
+  const trust: CustomServerTrust = isCustomServerTrust(envOrTrust) ? envOrTrust : { trusted: true };
+  const env: NodeJS.ProcessEnv = isCustomServerTrust(envOrTrust) ? (maybeEnv ?? process.env) : envOrTrust;
   const base = {
     id,
     title: id,

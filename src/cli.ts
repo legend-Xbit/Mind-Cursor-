@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { applyProfile, loadConfigFile, resolveModel, resolveRuntime } from "./config.ts";
+import { redactMcpServers, toPublicTools } from "./mcp/redact.ts";
 import { inspectAll, resolveMcpServers, summarizeTools } from "./mcp/registry.ts";
-import { redactServer, redactTool } from "./redact.ts";
 import { EXIT_OK, EXIT_STARTUP_FAILED, exitCodeForStatus, formatStartupError } from "./sdk/errors.ts";
 import type { RuntimeKind } from "./types.ts";
 import { LAYER_VERSION } from "./version.ts";
@@ -34,7 +34,7 @@ Usage:
 Flags:
   --config path              explicit mind-cursor.config.json path (also trusts its customServers)
   --trust-config             trust customServers from a config file discovered in cwd
-  --reveal-secrets           print raw tokens/headers instead of redacted key names (list/resolve only)
+  --reveal-secrets           print raw connection fields (list/resolve only); warns on stderr
   --include-unauthenticated  attach HTTP/SSE servers that have a URL but no token
 
 Environment:
@@ -89,6 +89,10 @@ function parseArgs(argv: string[]): Flags {
   return flags;
 }
 
+function warnRevealSecrets(): void {
+  process.stderr.write("warning: printing raw tokens and headers (--reveal-secrets)\n");
+}
+
 function print(value: unknown, asJson: boolean): void {
   if (asJson || typeof value !== "string") {
     process.stdout.write(`${JSON.stringify(value, null, 2)}\n`);
@@ -119,7 +123,10 @@ async function main(): Promise<number> {
 
   if (flags.command === "list") {
     const tools = inspectAll({ config, runtime, trustCustomServers, configPath: loaded.path });
-    const view = flags.revealSecrets ? tools : tools.map(redactTool);
+    if (flags.revealSecrets) {
+      warnRevealSecrets();
+    }
+    const view = flags.revealSecrets ? tools : toPublicTools(tools);
     if (flags.json) {
       print({ version: LAYER_VERSION, model: resolveModel(config), runtime, ...summarizeTools(tools), tools: view }, true);
     } else {
@@ -146,12 +153,10 @@ async function main(): Promise<number> {
       trustCustomServers,
       configPath: loaded.path,
     });
-    const view = flags.revealSecrets
-      ? servers
-      : Object.fromEntries(Object.entries(servers).map(([id, server]) => [id, redactServer(server)]));
     if (flags.revealSecrets) {
-      process.stderr.write("warning: printing raw tokens and headers (--reveal-secrets)\n");
+      warnRevealSecrets();
     }
+    const view = flags.revealSecrets ? servers : redactMcpServers(servers);
     print({ runtime, model: resolveModel(config), servers: view }, true);
     return EXIT_OK;
   }

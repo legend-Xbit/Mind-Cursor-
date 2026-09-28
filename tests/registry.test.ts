@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { getPreset } from "../src/mcp/presets.ts";
-import { inspectAll, inspectPreset, resolveMcpServers, summarizeTools } from "../src/mcp/registry.ts";
-import { redactTool } from "../src/redact.ts";
+import { toPublicTool } from "../src/mcp/redact.ts";
+import { inspectAll, inspectCustom, inspectPreset, resolveMcpServers, summarizeTools } from "../src/mcp/registry.ts";
 import type { HttpMcpServerConfig, McpServerConfig } from "../src/types.ts";
 
 const emptyEnv: NodeJS.ProcessEnv = {};
@@ -257,13 +257,44 @@ describe("inspectCustom", () => {
 });
 
 describe("redaction sibling assertion", () => {
-  it("redactTool never carries the raw token that inspectPreset resolved", () => {
+  it("toPublicTool never carries the raw token that inspectPreset resolved", () => {
     const notion = getPreset("notion");
     assert.ok(notion);
     const resolved = inspectPreset(notion, { NOTION_API_KEY: "ntn_test" });
     assert.equal(asHttp(resolved.server).headers?.Authorization, "Bearer " + "ntn_test");
-    const redacted = redactTool(resolved);
+    const redacted = toPublicTool(resolved);
     assert.ok(!JSON.stringify(redacted).includes("ntn_test"));
-    assert.deepEqual((redacted.server as { headerKeys?: string[] }).headerKeys, ["Authorization"]);
+    assert.equal(redacted.server && "url" in redacted.server && redacted.server.url, "[redacted]");
+    assert.equal(redacted.server && "hasHeaders" in redacted.server && redacted.server.hasHeaders, true);
+  });
+});
+
+describe("inspectCustom compatibility", () => {
+  it("keeps the historical (id, server, selected, env) argument order", () => {
+    const tool = inspectCustom(
+      "files",
+      { type: "stdio", command: "${CUSTOM_CMD}", args: ["--token", "${TOKEN}"] },
+      true,
+      { CUSTOM_CMD: "npx", TOKEN: "sekrit" },
+    );
+    assert.equal(tool.status, "ready");
+    assert.ok(tool.server && "command" in tool.server);
+    if (tool.server && "command" in tool.server) {
+      assert.equal(tool.server.command, "npx");
+      assert.deepEqual(tool.server.args, ["--token", "sekrit"]);
+    }
+  });
+
+  it("accepts an explicit trust object before env", () => {
+    const blocked = inspectCustom(
+      "files",
+      { type: "stdio", command: "npx" },
+      true,
+      { trusted: false, configPath: "/tmp/mind-cursor.config.json" },
+      {},
+    );
+    assert.equal(blocked.status, "needs_config");
+    assert.match(blocked.reason ?? "", /untrusted/);
+    assert.equal(blocked.server, undefined);
   });
 });

@@ -2,7 +2,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import { applyProfile, loadConfigFile, resolveModel, resolveRuntime } from "../config.ts";
-import { redactServer, redactTool } from "../redact.ts";
+import { redactMcpServers, toPublicTools } from "./redact.ts";
 import type { createMindCursor as CreateMindCursorFn } from "../sdk/client.ts";
 import { LAYER_VERSION } from "../version.ts";
 import { TOOL_PRESETS } from "./presets.ts";
@@ -87,7 +87,7 @@ export function createMindCursorMcpServer(deps: CreateMindCursorMcpServerDeps = 
     {
       title: "List MCP tool adapters",
       description:
-        "List Notion, Vercel, GitHub, Slack, Linear, Figma, Treg, Plain, and custom MCP adapters with ready / needs_auth / needs_config status. Server URLs and header/env/arg secrets are redacted to key names only — see mind_resolve_mcp for the shape.",
+        "List Notion, Vercel, GitHub, Slack, Linear, Figma, Treg, Plain, and custom MCP adapters with ready / needs_auth / needs_config status. Connection URLs, commands, arguments, headers, and env values are redacted.",
       inputSchema: {
         profile: z.string().optional(),
       },
@@ -95,7 +95,7 @@ export function createMindCursorMcpServer(deps: CreateMindCursorMcpServerDeps = 
     async ({ profile }) => {
       const layer = loadLayer(resolved, profile);
       return {
-        content: [{ type: "text", text: JSON.stringify(layer.tools.map(redactTool), null, 2) }],
+        content: [{ type: "text", text: JSON.stringify(toPublicTools(layer.tools), null, 2) }],
       };
     },
   );
@@ -105,7 +105,7 @@ export function createMindCursorMcpServer(deps: CreateMindCursorMcpServerDeps = 
     {
       title: "Resolve MCP servers for a Cursor SDK agent",
       description:
-        "Build the mcpServers object that would be passed to Agent.create / Agent.prompt / Agent.resume, redacted for display: header/env/CLIENT_SECRET values become key-name lists (headerKeys/envKeys/authKeys), URLs have userinfo and query stripped and opaque path segments blanked, and stdio args after a --token/--key/-H style flag are blanked. Actual secret values never leave the process through this tool.",
+        "Inspect servers attached to a Cursor SDK agent. Connection URLs, commands, arguments and credentials are redacted; use the SDK helper for actual connection options.",
       inputSchema: {
         profile: z.string().optional(),
         includeUnauthenticated: z
@@ -128,9 +128,7 @@ export function createMindCursorMcpServer(deps: CreateMindCursorMcpServerDeps = 
         trustCustomServers,
         configPath: loaded.path,
       });
-      const redacted = Object.fromEntries(
-        Object.entries(servers).map(([id, server]) => [id, redactServer(server)]),
-      );
+      const redacted = redactMcpServers(servers);
       return {
         content: [{ type: "text", text: JSON.stringify({ runtime, servers: redacted }, null, 2) }],
       };

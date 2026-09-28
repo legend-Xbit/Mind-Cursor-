@@ -18,13 +18,12 @@ export type { PublicResolvedTool, RedactedMcpServer } from "./mcp/redact.ts";
 export { inspectAll, inspectCustom, inspectPreset, resolveMcpServers, summarizeTools } from "./mcp/registry.ts";
 export type { CustomServerTrust } from "./mcp/registry.ts";
 export { getPreset, PRESET_IDS, TOOL_PRESETS } from "./mcp/presets.ts";
-export { redactServer, redactTool, scrubUrl } from "./redact.ts";
-export type { RedactedServer, RedactedTool } from "./redact.ts";
 export { LAYER_VERSION } from "./version.ts";
 export type {
   CloudRepoConfig,
   ConfigSource,
   HttpMcpServerConfig,
+  LayerInfo,
   LoadedConfig,
   McpServerConfig,
   MindCursorConfig,

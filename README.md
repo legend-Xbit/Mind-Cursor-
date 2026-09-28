@@ -39,15 +39,15 @@ npx tsx src/cli.ts resume agent-... "حدّث سجل التغييرات"
 npx tsx src/cli.ts serve
 ```
 
-`serve` يشغّل سيرفر MCP محلي (`mind_list_tools`, `mind_resolve_mcp`, `mind_layer_info`, `mind_run_agent`, `mind_resume_agent`). ملف `.cursor/mcp.json` يربطه بهذا المشروع مع Notion وVercel وGitHub وSlack.
+`list --json` and `resolve` print a redacted catalog. Connection URLs, stdio commands, and arguments are `[redacted]` — inline forms such as `--token=secret` / `--api_key=...` and punctuated URL path segments included — because any of them may contain credentials expanded from `${ENV}`. Headers, OAuth credentials, and stdio environment values are hidden too (`hasHeaders`, `hasAuth`, `hasEnv`). The CLI, the SDK catalog (`send().tools`), and `mind_list_tools` / `mind_resolve_mcp` share that redaction. `--reveal-secrets` on `list` or `resolve` prints the raw values and writes a warning to stderr; the MCP tools have no reveal flag. Use `layer.mcpServers()` in code for the actual connection options.
 
-مخرجات `list` و`resolve` (والأدوات المقابلة في MCP) **محجوبة افتراضياً**: قيم الرؤوس (headers)، `CLIENT_SECRET`، ومتغيرات env تظهر كأسماء مفاتيح فقط (`headerKeys`, `envKeys`, `authKeys`) لا كقيم. مرّر `--reveal-secrets` لـ`list`/`resolve` لطباعة القيم الخام عند الحاجة الفعلية (يطبع تحذيراً على stderr).
+`serve` يشغّل سيرفر MCP محلي (`mind_list_tools`, `mind_resolve_mcp`, `mind_layer_info`, `mind_run_agent`, `mind_resume_agent`). ملف `.cursor/mcp.json` يربطه بهذا المشروع مع Notion وVercel وGitHub وSlack.
 
 ### مصدر الإعداد والثقة
 
 - `MIND_CURSOR_CONFIG=<path>` أو `--config <path>` يحدّدان ملف الإعداد صراحةً. غيابهما يجعل الطبقة تبحث عن `./mind-cursor.config.json` في مجلد العمل تلقائياً ("discovered").
 - مسار صريح (`--config` أو `MIND_CURSOR_CONFIG`) مفقود يوقف التنفيذ برسالة خطأ واضحة بدل التراجع الصامت للقيم الافتراضية. مسار "discovered" مفقود يمر بصمت (لا إعداد = القيم الافتراضية).
-- `config.customServers` من ملف **discovered** (غير محدَّد صراحةً) **غير موثوق افتراضياً**: أوامره (stdio) وروابطه (http) لا تُرفق، لأن `mind-cursor` قد يُشغَّل داخل أي مستودع مستنسَخ فيحاول ذلك المستودع تشغيل أوامره الخاصة. مرّر `--trust-config` أو `MIND_CURSOR_TRUST_CONFIG=1` لتوثيقها، أو أشر لملف الإعداد صراحةً عبر `--config`/`MIND_CURSOR_CONFIG` (يُعتبر التحديد الصريح توثيقاً تلقائياً).
+- `config.customServers` من ملف **discovered** (غير محدَّد صراحةً) **غير موثوق افتراضياً**: أوامره (stdio) وروابطه (http) لا تُرفق، لأن `mind-cursor` قد يُشغَّل داخل أي مستودع مستنسَخ فيحاول ذلك المستودع تشغيل أوامره الخاصة. مرّر `--trust-config` أو `MIND_CURSOR_TRUST_CONFIG=1` لتوثيقها، أو أشر لملف الإعداد صراحةً عبر `--config`/`MIND_CURSOR_CONFIG` (يُعتبر التحديد الصريح توثيقاً تلقائياً). سيرفر مذكور في `disabled` لا يُحتسب ضمن غير الموثوق، فلا يمنع `mind_run_agent` / `mind_resume_agent`.
 
 ## من الكود
 
@@ -60,7 +60,9 @@ if (result.status === "cancelled") process.exit(3);
 if (result.status !== "finished") process.exit(2);
 ```
 
-`Agent.prompt` عبر `layer.prompt()` للطلقة الواحدة. `layer.send()` للبث والمتابعة. Inspect-only helpers (`tools()`, `mcpServers()`, `catalog()`) do not require `CURSOR_API_KEY`. السحابة: `{ runtime: "cloud" }` مع `MIND_CURSOR_REPO_URL` أو `cloud.repos` في `mind-cursor.config.json` — missing both is a startup error on **create**. `resume` of an existing `bc-*` agent does not require repos. `send()` returns a redacted `tools` catalog (ids/status and non-secret server metadata) and forwards `error` from `run.wait()` when the run fails. An explicit `MIND_CURSOR_CONFIG` / `configPath` that does not exist is a startup error (the default `mind-cursor.config.json` may be omitted).
+`Agent.prompt` عبر `layer.prompt()` للطلقة الواحدة. `layer.send()` للبث والمتابعة. Inspect-only helpers (`tools()`, `mcpServers()`, `catalog()`) do not require `CURSOR_API_KEY`. السحابة: `{ runtime: "cloud" }` مع `MIND_CURSOR_REPO_URL` أو `cloud.repos` في `mind-cursor.config.json` — missing both is a startup error on **create**. `resume` of an existing `bc-*` agent does not require repos. `send()` returns a redacted `tools` catalog (the same shape as `list --json`) and forwards `error` from `run.wait()` when the run fails. An explicit `MIND_CURSOR_CONFIG` / `configPath` that does not exist is a startup error (the default `mind-cursor.config.json` may be omitted).
+
+`loadConfigFile(path?, env?)` still returns a `MindCursorConfig`. Pass `{ path, env }` when you also need provenance (`LoadedConfig`: `source`, `path`, `dir`). `inspectCustom(id, server, selected, env?)` still treats the fourth argument as env and attaches a selected server; pass `{ trusted, configPath? }` in that position to apply the trust gate. `LayerInfo` stays exported. `local.cwd` resolves against the config file's directory. An explicit `options.cwd` resolves against the caller's working directory.
 
 الملف `mind-cursor.config.json` فيه الملفات الشخصية `local-dev` و`ci` و`cloud-pr`.
 
@@ -77,7 +79,7 @@ if (result.status !== "finished") process.exit(2);
 | `treg` | `TREG_MCP_URL` | needs_config |
 | `plain` | `PLAIN_MCP_URL` | needs_config |
 
-أضف سيرفرات خاصة تحت `customServers` في الإعداد (راجع "مصدر الإعداد والثقة" أعلاه لشرط التوثيق). They attach automatically unless listed in `disabled`; `enabled` filters built-in presets only, so you do not need to add a custom id there. على السحابة تُحذف `cwd` من إعدادات stdio لأن SDK يرفضها. `local.cwd` (عند تحديده) يُحسَب نسبةً لمجلد ملف الإعداد، لا مجلد العمل الحالي. Empty URL or stdio command after `${ENV}` expansion is `needs_config`; an empty Authorization header after expansion is `needs_auth`.
+أضف سيرفرات خاصة تحت `customServers` في الإعداد (راجع "مصدر الإعداد والثقة" أعلاه لشرط التوثيق). They attach automatically unless listed in `disabled`; `enabled` filters built-in presets only, so you do not need to add a custom id there. على السحابة تُحذف `cwd` من إعدادات stdio لأن SDK يرفضها. `local.cwd` يُحسَب نسبةً لمجلد ملف الإعداد. `options.cwd` الصريح يُحسَب نسبةً لمجلد عمل المستدعي. Empty URL or stdio command after `${ENV}` expansion is `needs_config`; an empty Authorization header after expansion is `needs_auth`.
 
 ## ملاحظات SDK
 

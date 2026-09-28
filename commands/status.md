@@ -27,7 +27,7 @@ No destructive operations.
 
 ### MCP-first
 
-`mind_layer_info` and `mind_resolve_mcp` (redacted: `headerKeys` / `authKeys` / `envKeys` only, never values).
+`mind_layer_info` and `mind_resolve_mcp` (connection URLs, commands, and arguments are `[redacted]`; header, auth, and env values are omitted).
 
 ### CLI-fallback
 

@@ -2,7 +2,6 @@ import { resolve } from "node:path";
 import { Agent, CursorAgentError, type AgentOptions } from "@cursor/sdk";
 import { applyProfile, loadConfigFile, resolveModel, resolveRuntime } from "../config.ts";
 import { toPublicTools, type PublicResolvedTool } from "../mcp/redact.ts";
-import { getPreset } from "../mcp/presets.ts";
 import { inspectAll, resolveMcpServers, summarizeTools } from "../mcp/registry.ts";
 import type { CloudRepoConfig, McpServerConfig, MindCursorConfig, ResolvedTool, RuntimeKind } from "../types.ts";
 import { formatStartupError } from "./errors.ts";
@@ -96,7 +95,16 @@ export class MindCursor {
     this.runtime = resolveRuntime(this.config, options.runtime, this.env);
     this.model = options.model?.trim() || resolveModel(this.config, this.env);
     this.apiKey = readApiKey(options, this.env);
-    this.cwd = resolve(configDir ?? process.cwd(), options.cwd ?? this.config.local?.cwd ?? ".");
+    const callerCwd = process.cwd();
+    if (options.cwd !== undefined) {
+      // An explicit cwd is the caller's path, even when it is relative.
+      // config.local.cwd stays relative to the config file.
+      this.cwd = resolve(callerCwd, options.cwd);
+    } else if (this.config.local?.cwd !== undefined) {
+      this.cwd = resolve(configDir ?? callerCwd, this.config.local.cwd);
+    } else {
+      this.cwd = callerCwd;
+    }
     this.includeUnauthenticated =
       options.includeUnauthenticated ?? this.config.includeUnauthenticated ?? false;
 
@@ -108,12 +116,18 @@ export class MindCursor {
     }
   }
 
-  /** Custom server ids present in config that were skipped because the config file is untrusted. */
+  /**
+   * Selected custom server ids skipped because the config file is untrusted.
+   * Disabled entries are omitted: they are not attached, so they must not
+   * block `mind_run_agent` / `mind_resume_agent`.
+   */
   untrustedCustomServerIds(): string[] {
     if (this.trustCustomServers) {
       return [];
     }
-    return Object.keys(this.config.customServers ?? {}).filter((id) => !getPreset(id));
+    return this.tools()
+      .filter((tool) => tool.category === "custom" && tool.status === "needs_config")
+      .map((tool) => tool.id);
   }
 
   private requireApiKey(): string {

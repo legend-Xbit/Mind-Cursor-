@@ -108,6 +108,14 @@ export type ResolveOptions = {
   configPath?: string;
 };
 
+/** Public snapshot returned by `mind_layer_info`. */
+export type LayerInfo = {
+  name: string;
+  version: string;
+  model: string;
+  runtime: RuntimeKind;
+};
+
 /** How a loaded config file was located — see {@link LoadedConfig}. */
 export type ConfigSource = "explicit" | "discovered" | "none";
 

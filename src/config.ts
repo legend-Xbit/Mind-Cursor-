@@ -42,21 +42,7 @@ export type LoadConfigOptions = {
   env?: NodeJS.ProcessEnv;
 };
 
-/**
- * Load and interpolate the mind-cursor config file, reporting provenance.
- *
- * The path is resolved as: `options.path` (explicit) → `env.MIND_CURSOR_CONFIG`
- * (explicit) → `./mind-cursor.config.json` (discovered by scanning the
- * working directory). When the path was given explicitly and the file is
- * missing, this throws — a typo'd `MIND_CURSOR_CONFIG` should fail loudly,
- * not silently fall back to defaults. When the path was only discovered and
- * is missing, an empty config with `source: "none"` is returned.
- *
- * `source` distinguishes "explicit" from "discovered": callers use it to
- * decide whether `config.customServers` is trustworthy enough to run (see
- * `ResolveOptions.trustCustomServers`).
- */
-export function loadConfigFile(options: LoadConfigOptions = {}): LoadedConfig {
+function readLoadedConfig(options: LoadConfigOptions): LoadedConfig {
   const env = options.env ?? process.env;
   const explicit = options.path ?? env.MIND_CURSOR_CONFIG;
   const source: ConfigSource = explicit ? "explicit" : "discovered";
@@ -69,7 +55,7 @@ export function loadConfigFile(options: LoadConfigOptions = {}): LoadedConfig {
     const code = (error as NodeJS.ErrnoException).code;
     if (code === "ENOENT") {
       if (source === "explicit") {
-        throw new Error(`config file not found: ${absolute}`);
+        throw new Error(`mind-cursor config not found: ${absolute}`);
       }
       return { config: {}, path: absolute, dir, source: "none" };
     }
@@ -81,11 +67,33 @@ export function loadConfigFile(options: LoadConfigOptions = {}): LoadedConfig {
     raw = JSON.parse(text);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    throw new Error(`${absolute}: ${message}`);
+    throw new Error(`Invalid JSON in mind-cursor config ${absolute}: ${message}`);
   }
   const parsed = parseConfig(raw);
   const config = interpolateUnknown(parsed, env) as MindCursorConfig;
   return { config, path: absolute, dir, source };
+}
+
+/**
+ * Load and interpolate the mind-cursor config file.
+ *
+ * Historical call: `loadConfigFile(path?, env?)` returns the config object.
+ * Options call: `loadConfigFile({ path, env })` also reports provenance
+ * (`source`, `path`, `dir`). The path is resolved as `options.path` /
+ * the path argument → `env.MIND_CURSOR_CONFIG` → `./mind-cursor.config.json`.
+ * An explicit path that is missing throws. A discovered path that is missing
+ * yields an empty config (`source: "none"` on the options form).
+ */
+export function loadConfigFile(path?: string, env?: NodeJS.ProcessEnv): MindCursorConfig;
+export function loadConfigFile(options: LoadConfigOptions): LoadedConfig;
+export function loadConfigFile(
+  pathOrOptions?: string | LoadConfigOptions,
+  env?: NodeJS.ProcessEnv,
+): MindCursorConfig | LoadedConfig {
+  if (typeof pathOrOptions === "object" && pathOrOptions !== null) {
+    return readLoadedConfig(pathOrOptions);
+  }
+  return readLoadedConfig({ path: pathOrOptions, env }).config;
 }
 
 export function mergeConfig(
