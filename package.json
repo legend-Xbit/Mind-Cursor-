@@ -2,6 +2,7 @@
   "name": "mind-cursor",
   "version": "0.1.0",
   "description": "MCP work layer that wires Cursor SDK agents to Notion, Vercel, and other tools",
+  "license": "MIT",
   "type": "module",
   "engines": {
     "node": ">=22.13"
@@ -22,13 +23,13 @@
     "build": "tsc",
     "mind": "tsx src/cli.ts",
     "serve": "tsx src/cli.ts serve",
-    "test": "tsx --test tests/**/*.test.ts",
-    "typecheck": "tsc --noEmit",
+    "test": "tsx --test \"tests/**/*.test.ts\"",
+    "typecheck": "tsc -p tsconfig.check.json",
     "validate:commands": "tsx scripts/validate-commands.ts"
   },
   "dependencies": {
     "@cursor/sdk": "^1.0.0",
-    "@modelcontextprotocol/sdk": "^1.25.1",
+    "@modelcontextprotocol/sdk": "~1.30.0",
     "zod": "^3.25.76"
   },
   "devDependencies": {

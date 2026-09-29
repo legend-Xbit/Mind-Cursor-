@@ -1,5 +1,4 @@
 import { interpolateUnknown } from "../config.ts";
-import { getPreset, TOOL_PRESETS } from "./presets.ts";
 import type {
   HttpMcpServerConfig,
   McpServerConfig,
@@ -11,6 +10,7 @@ import type {
   ToolPreset,
   ToolStatus,
 } from "../types.ts";
+import { getPreset, TOOL_PRESETS } from "./presets.ts";
 
 function firstEnv(env: NodeJS.ProcessEnv, keys: string[] | undefined): string | undefined {
   if (!keys) {
@@ -38,9 +38,6 @@ function isSelected(
   if (config.disabled?.includes(id)) {
     return false;
   }
-  // Explicit customServers entries are on unless disabled. `enabled` only
-  // filters built-in presets, so adding a server under customServers works
-  // without also listing its id in enabled.
   if (kind === "custom") {
     return true;
   }
@@ -91,7 +88,7 @@ function buildHttpServer(preset: ToolPreset, env: NodeJS.ProcessEnv): {
   const server: HttpMcpServerConfig = { type: "http", url };
 
   if (token) {
-    server.headers = { Authorization: `Bearer ${token}` };
+    server.headers = { Authorization: "Bearer " + token };
   }
   if (clientId) {
     server.auth = {
@@ -124,12 +121,47 @@ export function inspectPreset(preset: ToolPreset, env: NodeJS.ProcessEnv = proce
   };
 }
 
+export type CustomServerTrust = {
+  /** Whether config.customServers may actually run/attach. */
+  trusted: boolean;
+  /** Path of the config file, for the "untrusted" reason message only. */
+  configPath?: string;
+};
+
+function isCustomServerTrust(value: NodeJS.ProcessEnv | CustomServerTrust): value is CustomServerTrust {
+  return typeof (value as CustomServerTrust).trusted === "boolean";
+}
+
+/**
+ * Inspect one custom server.
+ *
+ * `inspectCustom(id, server, selected, env?)` keeps the historical argument
+ * order and attaches a selected server (trust was not a parameter then).
+ * `inspectCustom(id, server, selected, { trusted, configPath? }, env?)`
+ * applies the trust gate.
+ */
 export function inspectCustom(
   id: string,
   server: McpServerConfig,
   selected: boolean,
-  env: NodeJS.ProcessEnv = process.env,
+  env?: NodeJS.ProcessEnv,
+): ResolvedTool;
+export function inspectCustom(
+  id: string,
+  server: McpServerConfig,
+  selected: boolean,
+  trust: CustomServerTrust,
+  env?: NodeJS.ProcessEnv,
+): ResolvedTool;
+export function inspectCustom(
+  id: string,
+  server: McpServerConfig,
+  selected: boolean,
+  envOrTrust: NodeJS.ProcessEnv | CustomServerTrust = process.env,
+  maybeEnv?: NodeJS.ProcessEnv,
 ): ResolvedTool {
+  const trust: CustomServerTrust = isCustomServerTrust(envOrTrust) ? envOrTrust : { trusted: true };
+  const env: NodeJS.ProcessEnv = isCustomServerTrust(envOrTrust) ? (maybeEnv ?? process.env) : envOrTrust;
   const base = {
     id,
     title: id,
@@ -142,6 +174,14 @@ export function inspectCustom(
       ...base,
       status: "disabled",
       reason: "Listed in disabled.",
+    };
+  }
+
+  if (!trust.trusted) {
+    return {
+      ...base,
+      status: "needs_config",
+      reason: `untrusted customServers entry from ${trust.configPath ?? "the discovered config file"} — pass --trust-config or MIND_CURSOR_TRUST_CONFIG=1`,
     };
   }
 
@@ -248,11 +288,12 @@ export function inspectAll(options: ResolveOptions = {}): ResolvedTool[] {
     tools.push(inspectPreset(preset, env));
   }
 
+  const trust: CustomServerTrust = { trusted: options.trustCustomServers ?? false, configPath: options.configPath };
   for (const [id, server] of Object.entries(config.customServers ?? {})) {
     if (getPreset(id)) {
       continue;
     }
-    tools.push(inspectCustom(id, server, isSelected(id, config, "custom"), env));
+    tools.push(inspectCustom(id, server, isSelected(id, config, "custom"), trust, env));
   }
 
   return tools;
@@ -283,12 +324,7 @@ export function resolveMcpServers(options: ResolveOptions = {}): Record<string, 
   return servers;
 }
 
-export function summarizeTools(tools: ResolvedTool[]): {
-  ready: string[];
-  needsAuth: string[];
-  needsConfig: string[];
-  disabled: string[];
-} {
+export function summarizeTools(tools: ResolvedTool[]) {
   return {
     ready: tools.filter((tool) => tool.status === "ready").map((tool) => tool.id),
     needsAuth: tools.filter((tool) => tool.status === "needs_auth").map((tool) => tool.id),
