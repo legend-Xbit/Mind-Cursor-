@@ -87,7 +87,7 @@ describe("MCP tools never emit secret values", () => {
 });
 
 function runCli(args: string[]): { status: number | null; stdout: string; stderr: string } {
-  const result = spawnSync(process.execPath, [join(ROOT, "node_modules/tsx/dist/cli.mjs"), CLI, ...args], {
+  const result = spawnSync(process.execPath, ["--import", "tsx", CLI, ...args], {
     cwd: ROOT,
     env: { ...process.env, ...SECRET_ENV },
     encoding: "utf8",
