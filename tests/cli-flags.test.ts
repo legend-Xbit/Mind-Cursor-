@@ -8,10 +8,9 @@ import { describe, it } from "node:test";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
 const CLI = join(ROOT, "src/cli.ts");
-const TSX = join(ROOT, "node_modules/tsx/dist/cli.mjs");
 
 function runCli(args: string[], env: NodeJS.ProcessEnv): { status: number | null; stdout: string; stderr: string } {
-  const result = spawnSync(process.execPath, [TSX, CLI, ...args], { cwd: ROOT, env, encoding: "utf8" });
+  const result = spawnSync(process.execPath, ["--import", "tsx", CLI, ...args], { cwd: ROOT, env, encoding: "utf8" });
   return { status: result.status, stdout: result.stdout, stderr: result.stderr };
 }
 

@@ -21,11 +21,11 @@
   ],
   "scripts": {
     "build": "tsc",
-    "mind": "tsx src/cli.ts",
-    "serve": "tsx src/cli.ts serve",
-    "test": "tsx --test \"tests/**/*.test.ts\"",
+    "mind": "node --import tsx src/cli.ts",
+    "serve": "node --import tsx src/cli.ts serve",
+    "test": "node --import tsx --test \"tests/**/*.test.ts\"",
     "typecheck": "tsc -p tsconfig.check.json",
-    "validate:commands": "tsx scripts/validate-commands.ts"
+    "validate:commands": "node --import tsx scripts/validate-commands.ts"
   },
   "dependencies": {
     "@cursor/sdk": "^1.0.0",
